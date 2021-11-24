@@ -4,6 +4,7 @@ import (
 	"gonum.org/v1/gonum/stat"
 	"math"
 	"math/bits"
+	"sort"
 )
 
 func (r *Runtime) math_abs(call FunctionCall) Value {
@@ -316,6 +317,39 @@ func (r *Runtime) math_mean(call FunctionCall) Value {
 	}
 }
 
+func (r *Runtime) math_median(call FunctionCall) Value {
+	floatList := r.getFloat64Slice(call)
+
+	if floatList != nil && len(floatList) > 0 {
+		sort.Float64s(floatList)
+		return floatToValue(stat.Quantile(0.5, stat.Empirical, floatList, nil))
+	} else {
+		return _NaN
+	}
+}
+
+func (r *Runtime) math_var(call FunctionCall) Value {
+	floatList := r.getFloat64Slice(call)
+
+	if floatList != nil && len(floatList) > 0 {
+		_, ret := stat.PopMeanVariance(floatList, nil)
+		return floatToValue(ret)
+	} else {
+		return _NaN
+	}
+}
+
+func (r *Runtime) math_std(call FunctionCall) Value {
+	floatList := r.getFloat64Slice(call)
+
+	if floatList != nil && len(floatList) > 0 {
+		_, ret := stat.PopMeanVariance(floatList, nil)
+		return floatToValue(math.Sqrt(ret))
+	} else {
+		return _NaN
+	}
+}
+
 func (r *Runtime) createMath(val *Object) objectImpl {
 	m := &baseObject{
 		class:      classMath,
@@ -373,6 +407,9 @@ func (r *Runtime) createMath(val *Object) objectImpl {
 
 	// extend
 	m._putProp("mean", r.newNativeFunc(r.math_mean, nil, "mean", nil, 0), true, false, true)
+	m._putProp("median", r.newNativeFunc(r.math_median, nil, "median", nil, 0), true, false, true)
+	m._putProp("var", r.newNativeFunc(r.math_var, nil, "var", nil, 0), true, false, true)
+	m._putProp("std", r.newNativeFunc(r.math_std, nil, "std", nil, 0), true, false, true)
 
 	return m
 }
