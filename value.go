@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"unsafe"
 
-	"github.com/dop251/goja/ftoa"
-	"github.com/dop251/goja/unistring"
+	"github.com/peace0phmind/goja/ftoa"
+	"github.com/peace0phmind/goja/unistring"
 )
 
 var (

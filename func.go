@@ -3,7 +3,7 @@ package goja
 import (
 	"reflect"
 
-	"github.com/dop251/goja/unistring"
+	"github.com/peace0phmind/goja/unistring"
 )
 
 type baseFuncObject struct {

@@ -1,8 +1,8 @@
 package goja
 
 import (
-	"github.com/dop251/goja/parser"
-	"github.com/dop251/goja/unistring"
+	"github.com/peace0phmind/goja/parser"
+	"github.com/peace0phmind/goja/unistring"
 	"testing"
 )
 

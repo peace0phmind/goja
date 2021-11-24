@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dop251/goja/unistring"
+	"github.com/peace0phmind/goja/unistring"
 )
 
 const (

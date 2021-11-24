@@ -3,7 +3,7 @@ package goja
 import (
 	"fmt"
 	"github.com/dlclark/regexp2"
-	"github.com/dop251/goja/unistring"
+	"github.com/peace0phmind/goja/unistring"
 	"io"
 	"regexp"
 	"sort"

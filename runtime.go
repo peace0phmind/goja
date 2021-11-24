@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/dop251/goja/file"
+	"github.com/peace0phmind/goja/file"
 	"go/ast"
 	"hash/maphash"
 	"math"
@@ -17,9 +17,9 @@ import (
 
 	"golang.org/x/text/collate"
 
-	js_ast "github.com/dop251/goja/ast"
-	"github.com/dop251/goja/parser"
-	"github.com/dop251/goja/unistring"
+	js_ast "github.com/peace0phmind/goja/ast"
+	"github.com/peace0phmind/goja/parser"
+	"github.com/peace0phmind/goja/unistring"
 )
 
 const (
