@@ -1,6 +1,7 @@
 package goja
 
 import (
+	"gonum.org/v1/gonum/stat"
 	"math"
 	"math/bits"
 )
@@ -278,6 +279,43 @@ func (r *Runtime) math_trunc(call FunctionCall) Value {
 	return floatToValue(math.Trunc(arg.ToFloat()))
 }
 
+func (r *Runtime) getFloat64Slice(call FunctionCall) (result []float64) {
+	result = nil
+
+	var args []Value = nil
+
+	if o, ok := call.Argument(0).(*Object); ok {
+		if a, ok := o.self.(*arrayObject); ok {
+			args = a.values
+		}
+	} else {
+		args = call.Arguments
+	}
+
+	if args == nil || len(args) == 0 {
+		return nil
+	}
+
+	for _, arg := range args {
+		n := nilSafe(arg).ToFloat()
+		if !math.IsNaN(n) {
+			result = append(result, n)
+		}
+	}
+
+	return result
+}
+
+func (r *Runtime) math_mean(call FunctionCall) Value {
+	floatList := r.getFloat64Slice(call)
+
+	if floatList != nil && len(floatList) > 0 {
+		return floatToValue(stat.Mean(floatList, nil))
+	} else {
+		return _NaN
+	}
+}
+
 func (r *Runtime) createMath(val *Object) objectImpl {
 	m := &baseObject{
 		class:      classMath,
@@ -332,6 +370,9 @@ func (r *Runtime) createMath(val *Object) objectImpl {
 	m._putProp("tan", r.newNativeFunc(r.math_tan, nil, "tan", nil, 1), true, false, true)
 	m._putProp("tanh", r.newNativeFunc(r.math_tanh, nil, "tanh", nil, 1), true, false, true)
 	m._putProp("trunc", r.newNativeFunc(r.math_trunc, nil, "trunc", nil, 1), true, false, true)
+
+	// extend
+	m._putProp("mean", r.newNativeFunc(r.math_mean, nil, "mean", nil, 0), true, false, true)
 
 	return m
 }
