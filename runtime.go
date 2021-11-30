@@ -1300,6 +1300,27 @@ func (r *Runtime) compile(name, src string, strict, eval, inGlobal bool) (p *Pro
 	return
 }
 
+func (r *Runtime) RunStringWithReturn(str string) (Value, error) {
+	v, err := r.RunScript("", fmt.Sprintf("(function(){\n%s\n})()", str))
+	//if err != nil {
+	//	if e, ok := err.(*Exception); ok {
+	//		if e.stack != nil && len(e.stack) > 0 && e.stack[0].prg != nil {
+	//			prg := e.stack[0].prg
+	//			size := len(prg.srcMap)
+	//			if size > 0 {
+	//				for i := 0; i < size; i++ {
+	//					prg.srcMap[i].srcPos -= 13
+	//				}
+	//			}
+	//		}
+	//	}
+	//
+	//	return nil, err
+	//}
+
+	return v, err
+}
+
 // RunString executes the given string in the global context.
 func (r *Runtime) RunString(str string) (Value, error) {
 	return r.RunScript("", str)

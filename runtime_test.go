@@ -2430,3 +2430,14 @@ func BenchmarkAsciiStringMapGet(b *testing.B) {
 		}
 	}
 }
+
+func TestRunStringWithReturn(t *testing.T) {
+	r := New()
+	v, err := r.RunStringWithReturn("return true")
+	if err != nil {
+		panic(err)
+	}
+	if !v.ToBoolean() {
+		t.Fatal("return must be true")
+	}
+}
