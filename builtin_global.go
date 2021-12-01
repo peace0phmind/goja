@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -326,6 +327,11 @@ func (r *Runtime) builtin_unescape(call FunctionCall) Value {
 	return asciiString(asciiBuf)
 }
 
+func (r *Runtime) builtin_sleep(call FunctionCall) Value {
+	time.Sleep(time.Duration(call.Argument(0).ToInteger()) * time.Millisecond)
+	return _null
+}
+
 func (r *Runtime) initGlobalObject() {
 	o := r.globalObject.self
 	o._putProp("globalThis", r.globalObject, true, false, true)
@@ -343,6 +349,9 @@ func (r *Runtime) initGlobalObject() {
 	o._putProp("encodeURIComponent", r.newNativeFunc(r.builtin_encodeURIComponent, nil, "encodeURIComponent", nil, 1), true, false, true)
 	o._putProp("escape", r.newNativeFunc(r.builtin_escape, nil, "escape", nil, 1), true, false, true)
 	o._putProp("unescape", r.newNativeFunc(r.builtin_unescape, nil, "unescape", nil, 1), true, false, true)
+
+	// extend
+	o._putProp("sleep", r.newNativeFunc(r.builtin_sleep, nil, "sleep", nil, 1), true, false, true)
 
 	o._putSym(SymToStringTag, valueProp(asciiString(classGlobal), false, false, true))
 

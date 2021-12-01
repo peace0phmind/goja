@@ -1321,6 +1321,22 @@ func (r *Runtime) RunStringWithReturn(str string) (Value, error) {
 	return v, err
 }
 
+func (r *Runtime) RunStringWithReturnTimeout(str string, ms time.Duration) (Value, error) {
+	t := time.AfterFunc(ms, func() {
+		r.Interrupt(fmt.Sprintf("Timeout %v", ms))
+	})
+
+	v, err := r.RunStringWithReturn(str)
+	if err == nil {
+		if t != nil {
+			t.Stop()
+			t = nil
+		}
+	}
+
+	return v, err
+}
+
 // RunString executes the given string in the global context.
 func (r *Runtime) RunString(str string) (Value, error) {
 	return r.RunScript("", str)

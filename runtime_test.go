@@ -2441,3 +2441,43 @@ func TestRunStringWithReturn(t *testing.T) {
 		t.Fatal("return must be true")
 	}
 }
+
+func TestRunStringWithReturnTimeout(t *testing.T) {
+	SCRIPT := `
+	cnt += 1
+	sleep(500)
+	return cnt
+`
+	r := New()
+	r.Set("cnt", 0)
+	v, err := r.RunStringWithReturnTimeout(SCRIPT, 200*time.Millisecond)
+	if err != nil {
+		print(err.Error())
+	}
+	if v != nil {
+		print(v.Export())
+	}
+
+	v, err = r.RunStringWithReturnTimeout(SCRIPT, 600*time.Millisecond)
+	if err != nil {
+		print(err.Error())
+	}
+	if v != nil {
+		print(v.Export())
+	}
+}
+
+func TestSleep(t *testing.T) {
+	SCRIPT := `
+	cnt += 1
+	sleep('g')
+	return cnt
+`
+	r := New()
+	r.Set("cnt", 0)
+	v, err := r.RunStringWithReturn(SCRIPT)
+	if err != nil {
+		panic(err)
+	}
+	print(v)
+}
