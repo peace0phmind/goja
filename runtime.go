@@ -1301,7 +1301,7 @@ func (r *Runtime) compile(name, src string, strict, eval, inGlobal bool) (p *Pro
 }
 
 func (r *Runtime) RunStringWithReturn(str string) (Value, error) {
-	return r.RunScript("", fmt.Sprintf("(function(){\n%s\n})()", str))
+	return r.RunScript(file.WRAP_FUNCTION_SCRIPT, fmt.Sprintf("(function(){\n%s\n})()", str))
 }
 
 func (r *Runtime) RunStringWithReturnTimeout(str string, ms time.Duration) (Value, error) {
