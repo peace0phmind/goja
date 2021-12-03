@@ -1327,11 +1327,10 @@ func (r *Runtime) RunStringWithReturnTimeout(str string, ms time.Duration) (Valu
 	})
 
 	v, err := r.RunStringWithReturn(str)
-	if err == nil {
-		if t != nil {
-			t.Stop()
-			t = nil
-		}
+
+	if t != nil {
+		t.Stop()
+		t = nil
 	}
 
 	return v, err

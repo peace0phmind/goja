@@ -2452,18 +2452,45 @@ func TestRunStringWithReturnTimeout(t *testing.T) {
 	r.Set("cnt", 0)
 	v, err := r.RunStringWithReturnTimeout(SCRIPT, 200*time.Millisecond)
 	if err != nil {
-		print(err.Error())
+		if !strings.HasPrefix(err.Error(), "Timeout") {
+			panic(err)
+		}
 	}
+
 	if v != nil {
-		print(v.Export())
+		panic(v)
 	}
 
 	v, err = r.RunStringWithReturnTimeout(SCRIPT, 600*time.Millisecond)
 	if err != nil {
-		print(err.Error())
+		panic(err)
 	}
 	if v != nil {
-		print(v.Export())
+		if v.Export().(int64) != 2 {
+			t.Fatalf("Result: %+v, expected: %+v", v, 2)
+		}
+	}
+}
+
+func TestRunStringWithReturnTimeoutErr(t *testing.T) {
+	SCRIPT := `
+	if (xxxx) {
+		return true
+	}
+	return false
+`
+	r := New()
+	beginTime := time.Now()
+	_, err := r.RunStringWithReturnTimeout(SCRIPT, 200*time.Millisecond)
+	runTime := time.Now().Sub(beginTime)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "Timeout") {
+			t.Fatalf("Result: %+v", err)
+		}
+	}
+
+	if runTime > 100*time.Millisecond {
+		t.Fatalf("run time is : %+v", runTime)
 	}
 }
 
