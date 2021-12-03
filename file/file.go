@@ -123,6 +123,10 @@ func NewFile(filename, src string, base int) *File {
 }
 
 func (fl *File) Name() string {
+	if fl.isWrapFunc() {
+		return ""
+	}
+
 	return fl.name
 }
 
@@ -166,24 +170,28 @@ func (fl *File) Position(offset int) Position {
 
 	if fl.sourceMap != nil {
 		if source, _, row, col, ok := fl.sourceMap.Source(row, col); ok {
+			name := fl.Name()
 			if fl.isWrapFunc() {
 				row -= 1
+				name = ""
 			}
 
 			return Position{
-				Filename: ResolveSourcemapURL(fl.Name(), source).String(),
+				Filename: ResolveSourcemapURL(name, source).String(),
 				Line:     row,
 				Column:   col,
 			}
 		}
 	}
 
+	name := fl.name
 	if fl.isWrapFunc() {
 		row -= 1
+		name = ""
 	}
 
 	return Position{
-		Filename: fl.name,
+		Filename: name,
 		Line:     row,
 		Column:   col,
 	}
