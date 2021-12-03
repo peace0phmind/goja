@@ -102,6 +102,8 @@ func (self *FileSet) Position(idx Idx) Position {
 	return Position{}
 }
 
+const WRAP_FUNCTION_SCRIPT = "___wrap_function_script__"
+
 type File struct {
 	mu                sync.Mutex
 	name              string
@@ -136,6 +138,10 @@ func (fl *File) SetSourceMap(m *sourcemap.Consumer) {
 	fl.sourceMap = m
 }
 
+func (fl *File) isWrapFunc() bool {
+	return fl.name == WRAP_FUNCTION_SCRIPT
+}
+
 func (fl *File) Position(offset int) Position {
 	var line int
 	var lineOffsets []int
@@ -160,12 +166,20 @@ func (fl *File) Position(offset int) Position {
 
 	if fl.sourceMap != nil {
 		if source, _, row, col, ok := fl.sourceMap.Source(row, col); ok {
+			if fl.isWrapFunc() {
+				row -= 1
+			}
+
 			return Position{
 				Filename: ResolveSourcemapURL(fl.Name(), source).String(),
 				Line:     row,
 				Column:   col,
 			}
 		}
+	}
+
+	if fl.isWrapFunc() {
+		row -= 1
 	}
 
 	return Position{

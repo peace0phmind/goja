@@ -2440,6 +2440,12 @@ func TestRunStringWithReturn(t *testing.T) {
 	if !v.ToBoolean() {
 		t.Fatal("return must be true")
 	}
+
+	v, err = r.RunStringWithReturn("\n\nif (xxxx) {\n return true} \n return false")
+
+	if err != nil {
+		print(err.Error())
+	}
 }
 
 func TestRunStringWithReturnTimeout(t *testing.T) {

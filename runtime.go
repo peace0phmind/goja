@@ -1301,24 +1301,7 @@ func (r *Runtime) compile(name, src string, strict, eval, inGlobal bool) (p *Pro
 }
 
 func (r *Runtime) RunStringWithReturn(str string) (Value, error) {
-	v, err := r.RunScript("", fmt.Sprintf("(function(){\n%s\n})()", str))
-	//if err != nil {
-	//	if e, ok := err.(*Exception); ok {
-	//		if e.stack != nil && len(e.stack) > 0 && e.stack[0].prg != nil {
-	//			prg := e.stack[0].prg
-	//			size := len(prg.srcMap)
-	//			if size > 0 {
-	//				for i := 0; i < size; i++ {
-	//					prg.srcMap[i].srcPos -= 13
-	//				}
-	//			}
-	//		}
-	//	}
-	//
-	//	return nil, err
-	//}
-
-	return v, err
+	return r.RunScript(file.WRAP_FUNCTION_SCRIPT, fmt.Sprintf("(function(){\n%s\n})()", str))
 }
 
 func (r *Runtime) RunStringWithReturnTimeout(str string, ms time.Duration) (Value, error) {
