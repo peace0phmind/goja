@@ -1,6 +1,7 @@
 package goja
 
 import (
+	"fmt"
 	"hash/maphash"
 	"testing"
 )
@@ -58,7 +59,149 @@ func TestMapEvilIterator(t *testing.T) {
 
 	undefined;
 	`
-	testScript1(TESTLIB+SCRIPT, _undefined, t)
+	testScriptWithTestLib(SCRIPT, _undefined, t)
+}
+
+func TestMapExportToNilMap(t *testing.T) {
+	vm := New()
+	var m map[int]interface{}
+	res, err := vm.RunString("new Map([[1, true]])")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = vm.ExportTo(res, &m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m) != 1 {
+		t.Fatal(m)
+	}
+	if _, exists := m[1]; !exists {
+		t.Fatal(m)
+	}
+}
+
+func TestMapExportToNonNilMap(t *testing.T) {
+	vm := New()
+	m := map[int]interface{}{
+		2: true,
+	}
+	res, err := vm.RunString("new Map([[1, true]])")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = vm.ExportTo(res, &m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m) != 1 {
+		t.Fatal(m)
+	}
+	if _, exists := m[1]; !exists {
+		t.Fatal(m)
+	}
+}
+
+func TestMapGetAdderGetIteratorOrder(t *testing.T) {
+	const SCRIPT = `
+	let getterCalled = 0;
+
+	class M extends Map {
+	    get set() {
+	        getterCalled++;
+	        return null;
+	    }
+	}
+
+	let getIteratorCalled = 0;
+
+	let iterable = {};
+	iterable[Symbol.iterator] = () => {
+	    getIteratorCalled++
+	    return {
+	        next: 1
+	    };
+	}
+
+	let thrown = false;
+
+	try {
+	    new M(iterable);
+	} catch (e) {
+	    if (e instanceof TypeError) {
+	        thrown = true;
+	    } else {
+	        throw e;
+	    }
+	}
+
+	thrown && getterCalled === 1 && getIteratorCalled === 0;
+	`
+	testScript(SCRIPT, valueTrue, t)
+}
+
+func ExampleObject_Export_map() {
+	vm := New()
+	m, err := vm.RunString(`
+	new Map([[1, true], [2, false]]);
+	`)
+	if err != nil {
+		panic(err)
+	}
+	exp := m.Export()
+	fmt.Printf("%T, %v\n", exp, exp)
+	// Output: [][2]interface {}, [[1 true] [2 false]]
+}
+
+func ExampleRuntime_ExportTo_mapToMap() {
+	vm := New()
+	m, err := vm.RunString(`
+	new Map([[1, true], [2, false]]);
+	`)
+	if err != nil {
+		panic(err)
+	}
+	exp := make(map[int]bool)
+	err = vm.ExportTo(m, &exp)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(exp)
+	// Output: map[1:true 2:false]
+}
+
+func ExampleRuntime_ExportTo_mapToSlice() {
+	vm := New()
+	m, err := vm.RunString(`
+	new Map([[1, true], [2, false]]);
+	`)
+	if err != nil {
+		panic(err)
+	}
+	exp := make([][]interface{}, 0)
+	err = vm.ExportTo(m, &exp)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(exp)
+	// Output: [[1 true] [2 false]]
+}
+
+func ExampleRuntime_ExportTo_mapToTypedSlice() {
+	vm := New()
+	m, err := vm.RunString(`
+	new Map([[1, true], [2, false]]);
+	`)
+	if err != nil {
+		panic(err)
+	}
+	exp := make([][2]interface{}, 0)
+	err = vm.ExportTo(m, &exp)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(exp)
+	// Output: [[1 true] [2 false]]
 }
 
 func BenchmarkMapDelete(b *testing.B) {

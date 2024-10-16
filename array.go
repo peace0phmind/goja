@@ -1,6 +1,7 @@
 package goja
 
 import (
+	"fmt"
 	"math"
 	"math/bits"
 	"reflect"
@@ -51,11 +52,11 @@ func (r *Runtime) createArrayIterator(iterObj *Object, kind iterationKind) Value
 		obj:  iterObj,
 		kind: kind,
 	}
-	ai.class = classArrayIterator
+	ai.class = classObject
 	ai.val = o
 	ai.extensible = true
 	o.self = ai
-	ai.prototype = r.global.ArrayIteratorPrototype
+	ai.prototype = r.getArrayIteratorPrototype()
 	ai.init()
 
 	return o
@@ -126,9 +127,6 @@ func (a *arrayObject) setLengthInt(l uint32, throw bool) bool {
 }
 
 func (a *arrayObject) setLength(v uint32, throw bool) bool {
-	if v == a.length {
-		return true
-	}
 	if !a.lengthProp.writable {
 		a.val.runtime.typeErrorResult(throw, "length is not writable")
 		return false
@@ -180,11 +178,11 @@ func (a *arrayObject) getOwnPropIdx(idx valueInt) Value {
 	return a.baseObject.getOwnPropStr(idx.string())
 }
 
-func (a *arrayObject) sortLen() int64 {
-	return int64(len(a.values))
+func (a *arrayObject) sortLen() int {
+	return len(a.values)
 }
 
-func (a *arrayObject) sortGet(i int64) Value {
+func (a *arrayObject) sortGet(i int) Value {
 	v := a.values[i]
 	if p, ok := v.(*valueProperty); ok {
 		v = p.get(a.val)
@@ -192,7 +190,7 @@ func (a *arrayObject) sortGet(i int64) Value {
 	return v
 }
 
-func (a *arrayObject) swap(i, j int64) {
+func (a *arrayObject) swap(i int, j int) {
 	a.values[i], a.values[j] = a.values[j], a.values[i]
 }
 
@@ -200,7 +198,7 @@ func (a *arrayObject) getStr(name unistring.String, receiver Value) Value {
 	return a.getStrWithOwnProp(a.getOwnPropStr(name), name, receiver)
 }
 
-func (a *arrayObject) getLengthProp() Value {
+func (a *arrayObject) getLengthProp() *valueProperty {
 	a.lengthProp.value = intToValue(int64(a.length))
 	return &a.lengthProp
 }
@@ -334,6 +332,18 @@ func (a *arrayObject) hasOwnPropertyIdx(idx valueInt) bool {
 	return a.baseObject.hasOwnPropertyStr(idx.string())
 }
 
+func (a *arrayObject) hasPropertyIdx(idx valueInt) bool {
+	if a.hasOwnPropertyIdx(idx) {
+		return true
+	}
+
+	if a.prototype != nil {
+		return a.prototype.self.hasPropertyIdx(idx)
+	}
+
+	return false
+}
+
 func (a *arrayObject) expand(idx uint32) bool {
 	targetLen := idx + 1
 	if targetLen > uint32(len(a.values)) {
@@ -381,7 +391,10 @@ func (r *Runtime) defineArrayLength(prop *valueProperty, descr PropertyDescripto
 	}
 
 	if descr.Value != nil {
-		ret = setter(newLen, false)
+		oldLen := uint32(prop.value.ToInteger())
+		if oldLen != newLen {
+			ret = setter(newLen, false)
+		}
 	} else {
 		ret = true
 	}
@@ -436,7 +449,7 @@ func (a *arrayObject) defineOwnPropertyStr(name unistring.String, descr Property
 		return a._defineIdxProperty(idx, descr, throw)
 	}
 	if name == "length" {
-		return a.val.runtime.defineArrayLength(&a.lengthProp, descr, a.setLength, throw)
+		return a.val.runtime.defineArrayLength(a.getLengthProp(), descr, a.setLength, throw)
 	}
 	return a.baseObject.defineOwnPropertyStr(name, descr, throw)
 }
@@ -480,11 +493,11 @@ func (a *arrayObject) deleteIdx(idx valueInt, throw bool) bool {
 }
 
 func (a *arrayObject) export(ctx *objectExportCtx) interface{} {
-	if v, exists := ctx.get(a); exists {
+	if v, exists := ctx.get(a.val); exists {
 		return v
 	}
 	arr := make([]interface{}, a.length)
-	ctx.put(a, arr)
+	ctx.put(a.val, arr)
 	if a.propValueCount == 0 && a.length == uint32(len(a.values)) && uint32(a.objCount) == a.length {
 		for i, v := range a.values {
 			if v != nil {
@@ -504,6 +517,36 @@ func (a *arrayObject) export(ctx *objectExportCtx) interface{} {
 
 func (a *arrayObject) exportType() reflect.Type {
 	return reflectTypeArray
+}
+
+func (a *arrayObject) exportToArrayOrSlice(dst reflect.Value, typ reflect.Type, ctx *objectExportCtx) error {
+	r := a.val.runtime
+	if iter := a.getSym(SymIterator, nil); iter == r.getArrayValues() || iter == nil {
+		l := toIntStrict(int64(a.length))
+		if typ.Kind() == reflect.Array {
+			if dst.Len() != l {
+				return fmt.Errorf("cannot convert an Array into an array, lengths mismatch (have %d, need %d)", l, dst.Len())
+			}
+		} else {
+			dst.Set(reflect.MakeSlice(typ, l, l))
+		}
+		ctx.putTyped(a.val, typ, dst.Interface())
+		for i := 0; i < l; i++ {
+			if i >= len(a.values) {
+				break
+			}
+			val := a.values[i]
+			if p, ok := val.(*valueProperty); ok {
+				val = p.get(a.val)
+			}
+			err := r.toReflectValue(val, dst.Index(i), ctx)
+			if err != nil {
+				return fmt.Errorf("could not convert array element %v to %v at %d: %w", val, typ, i, err)
+			}
+		}
+		return nil
+	}
+	return a.baseObject.exportToArrayOrSlice(dst, typ, ctx)
 }
 
 func (a *arrayObject) setValuesFromSparse(items []sparseArrayItem, newMaxIdx int) {

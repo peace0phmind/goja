@@ -1,6 +1,9 @@
 package goja
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
 
 type testDynObject struct {
 	r *Runtime
@@ -103,7 +106,7 @@ func TestDynamicObject(t *testing.T) {
 	}
 	o := vm.NewDynamicObject(dynObj)
 	vm.Set("o", o)
-	_, err := vm.RunString(TESTLIBX + `
+	vm.testScriptWithTestLibX(`
 	assert(o instanceof Object, "instanceof Object");
 	assert(o === o, "self equality");
 	assert(o !== {}, "non-equality");
@@ -130,10 +133,7 @@ func TestDynamicObject(t *testing.T) {
 	assert.sameValue(o.__proto__, Object.prototype, "__proto__");
 	o.__proto__ = null;
 	assert(!("__proto__" in o), "__proto__ in o after setting to null");
-	`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	`, _undefined, t)
 }
 
 func TestDynamicObjectCustomProto(t *testing.T) {
@@ -145,7 +145,7 @@ func TestDynamicObjectCustomProto(t *testing.T) {
 	}
 	o := vm.NewDynamicObject(dynObj)
 	vm.Set("o", o)
-	_, err := vm.RunString(TESTLIB + `
+	vm.testScriptWithTestLib(`
 	var proto = {
 		valueOf: function() {
 			return this.num;
@@ -157,10 +157,8 @@ func TestDynamicObjectCustomProto(t *testing.T) {
 	assert(o instanceof Object, "instanceof");
 	assert.sameValue(o+1, 42);
 	assert.sameValue(o.toString(), "[object GoObject]");
-	`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	`, _undefined, t)
+
 	if v := m["num"]; v.Export() != int64(41) {
 		t.Fatal(v)
 	}
@@ -173,7 +171,7 @@ func TestDynamicArray(t *testing.T) {
 	}
 	a := vm.NewDynamicArray(dynObj)
 	vm.Set("a", a)
-	_, err := vm.RunString(TESTLIBX + `
+	vm.testScriptWithTestLibX(`
 	assert(a instanceof Array, "instanceof Array");
 	assert(a instanceof Object, "instanceof Object");
 	assert(a === a, "self equality");
@@ -243,8 +241,179 @@ func TestDynamicArray(t *testing.T) {
 		Object.defineProperty(a, 0, {value: 0, writable: false, enumerable: false, configurable: true});
 	}, "define prop");
 
-	`)
+	`, _undefined, t)
+}
 
+type testSharedDynObject struct {
+	sync.RWMutex
+	m map[string]Value
+}
+
+func (t *testSharedDynObject) Get(key string) Value {
+	t.RLock()
+	val := t.m[key]
+	t.RUnlock()
+	return val
+}
+
+func (t *testSharedDynObject) Set(key string, val Value) bool {
+	t.Lock()
+	t.m[key] = val
+	t.Unlock()
+	return true
+}
+
+func (t *testSharedDynObject) Has(key string) bool {
+	t.RLock()
+	_, exists := t.m[key]
+	t.RUnlock()
+	return exists
+}
+
+func (t *testSharedDynObject) Delete(key string) bool {
+	t.Lock()
+	delete(t.m, key)
+	t.Unlock()
+	return true
+}
+
+func (t *testSharedDynObject) Keys() []string {
+	t.RLock()
+	keys := make([]string, 0, len(t.m))
+	for k := range t.m {
+		keys = append(keys, k)
+	}
+	t.RUnlock()
+	return keys
+}
+
+func TestSharedDynamicObject(t *testing.T) {
+	dynObj := &testSharedDynObject{m: make(map[string]Value, 10000)}
+	o := NewSharedDynamicObject(dynObj)
+	ch := make(chan error, 1)
+	go func() {
+		vm := New()
+		vm.Set("o", o)
+		_, err := vm.RunString(`
+			for (let i = 0; i < 10000; i++) {
+				o[i] = i;
+			}
+		`)
+		ch <- err
+	}()
+	vm := New()
+	vm.Set("o", o)
+	_, err := vm.RunString(`
+			for (let i = 0; i < 10000; i++) {
+				o[i] = i+1;
+			}
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = <-ch
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+type testSharedDynArray struct {
+	sync.RWMutex
+	a []Value
+}
+
+func (t *testSharedDynArray) Len() int {
+	t.RLock()
+	l := len(t.a)
+	t.RUnlock()
+	return l
+}
+
+func (t *testSharedDynArray) Get(idx int) Value {
+	t.RLock()
+	defer t.RUnlock()
+	if idx < 0 {
+		idx += len(t.a)
+	}
+	if idx >= 0 && idx < len(t.a) {
+		return t.a[idx]
+	}
+	return nil
+}
+
+func (t *testSharedDynArray) expand(newLen int) {
+	if newLen > cap(t.a) {
+		a := make([]Value, newLen)
+		copy(a, t.a)
+		t.a = a
+	} else {
+		t.a = t.a[:newLen]
+	}
+}
+
+func (t *testSharedDynArray) Set(idx int, val Value) bool {
+	t.Lock()
+	defer t.Unlock()
+	if idx < 0 {
+		idx += len(t.a)
+	}
+	if idx < 0 {
+		return false
+	}
+	if idx >= len(t.a) {
+		t.expand(idx + 1)
+	}
+	t.a[idx] = val
+	return true
+}
+
+func (t *testSharedDynArray) SetLen(i int) bool {
+	t.Lock()
+	defer t.Unlock()
+	if i > len(t.a) {
+		t.expand(i)
+		return true
+	}
+	if i < 0 {
+		return false
+	}
+	if i < len(t.a) {
+		tail := t.a[i:len(t.a)]
+		for j := range tail {
+			tail[j] = nil
+		}
+		t.a = t.a[:i]
+	}
+	return true
+}
+
+func TestSharedDynamicArray(t *testing.T) {
+	dynObj := &testSharedDynArray{a: make([]Value, 10000)}
+	o := NewSharedDynamicArray(dynObj)
+	ch := make(chan error, 1)
+	go func() {
+		vm := New()
+		vm.Set("o", o)
+		_, err := vm.RunString(`
+			for (let i = 0; i < 10000; i++) {
+				o[i] = i;
+			}
+		`)
+		ch <- err
+	}()
+	vm := New()
+	vm.Set("o", o)
+	_, err := vm.RunString(`
+			for (let i = 0; i < 10000; i++) {
+				o[i] = i+1;
+			}
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = <-ch
 	if err != nil {
 		t.Fatal(err)
 	}

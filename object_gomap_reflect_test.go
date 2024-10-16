@@ -1,6 +1,8 @@
 package goja
 
 import (
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -173,7 +175,7 @@ func TestGoMapReflectWithProto(t *testing.T) {
 		"t": "42",
 	}
 	vm.Set("m", m)
-	_, err := vm.RunString(TESTLIB + `
+	vm.testScriptWithTestLib(`
 	(function() {
 	'use strict';
 	var proto = {};
@@ -221,10 +223,7 @@ func TestGoMapReflectWithProto(t *testing.T) {
 	m.t1 = "test2";
 	assert.sameValue(m.t1, "test2");
 	})();
-	`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	`, _undefined, t)
 }
 
 func TestGoMapReflectProtoProp(t *testing.T) {
@@ -244,10 +243,7 @@ func TestGoMapReflectProtoProp(t *testing.T) {
 
 	r := New()
 	r.Set("m", map[string]string{})
-	_, err := r.RunString(TESTLIB + SCRIPT)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r.testScriptWithTestLib(SCRIPT, _undefined, t)
 }
 
 func TestGoMapReflectUnicode(t *testing.T) {
@@ -277,4 +273,78 @@ func TestGoMapReflectUnicode(t *testing.T) {
 	if res == nil || !res.StrictEquals(valueInt(42)) {
 		t.Fatalf("Unexpected value: %v", res)
 	}
+}
+
+func TestGoMapReflectStruct(t *testing.T) {
+	type S struct {
+		Test int
+	}
+
+	m := map[string]S{
+		"1": {Test: 1},
+	}
+
+	vm := New()
+	vm.Set("m", m)
+	res, err := vm.RunString("m[1].Test = 2; m[1].Test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Export() != int64(1) {
+		t.Fatal(res)
+	}
+}
+
+func TestGoMapReflectElt(t *testing.T) {
+	type mapping map[string]interface{}
+
+	const SCRIPT = `a.s() && a.t === null && a.t1 === undefined;`
+
+	r := New()
+
+	r.Set("a", mapping{
+		"s": func() bool { return true },
+		"t": nil,
+	})
+
+	r.testScript(SCRIPT, valueTrue, t)
+}
+
+func TestGoMapReflectKeyToString(t *testing.T) {
+	vm := New()
+
+	test := func(v any, t *testing.T) {
+		o1 := vm.ToValue(v).ToObject(vm)
+		keys := o1.Keys()
+		sort.Strings(keys)
+		if len(keys) != 2 || keys[0] != "1" || keys[1] != "2" {
+			t.Fatal(keys)
+		}
+
+		keys1 := o1.self.stringKeys(true, nil)
+		sort.Slice(keys1, func(a, b int) bool {
+			return strings.Compare(keys1[a].String(), keys1[b].String()) < 0
+		})
+		if len(keys1) != 2 || keys1[0] != asciiString("1") || keys1[1] != asciiString("2") {
+			t.Fatal(keys1)
+		}
+	}
+
+	t.Run("int", func(t *testing.T) {
+		m1 := map[int]any{
+			1: 2,
+			2: 3,
+		}
+		test(m1, t)
+	})
+
+	t.Run("CustomString", func(t *testing.T) {
+		type CustomString string
+		m2 := map[CustomString]any{
+			"1": 2,
+			"2": 3,
+		}
+		test(m2, t)
+	})
+
 }

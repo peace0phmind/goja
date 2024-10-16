@@ -3,6 +3,7 @@ package goja
 import (
 	"math"
 	"sort"
+	"sync"
 )
 
 func (r *Runtime) newArray(prototype *Object) (a *arrayObject) {
@@ -19,7 +20,7 @@ func (r *Runtime) newArray(prototype *Object) (a *arrayObject) {
 }
 
 func (r *Runtime) newArrayObject() *arrayObject {
-	return r.newArray(r.global.ArrayPrototype)
+	return r.newArray(r.getArrayPrototype())
 }
 
 func setArrayValues(a *arrayObject, values []Value) *arrayObject {
@@ -96,7 +97,7 @@ func (r *Runtime) builtin_newArray(args []Value, proto *Object) *Object {
 			if float64(al) == float64(f) {
 				return r.newArrayLength(al)
 			} else {
-				panic(r.newError(r.global.RangeError, "Invalid array length"))
+				panic(r.newError(r.getRangeError(), "Invalid array length"))
 			}
 		}
 		return setArrayValues(r.newArray(proto), []Value{args[0]}).val
@@ -144,8 +145,8 @@ func (r *Runtime) arrayproto_pop(call FunctionCall) Value {
 	obj := call.This.ToObject(r)
 	if a, ok := obj.self.(*arrayObject); ok {
 		l := a.length
+		var val Value
 		if l > 0 {
-			var val Value
 			l--
 			if l < uint32(len(a.values)) {
 				val = a.values[l]
@@ -161,10 +162,15 @@ func (r *Runtime) arrayproto_pop(call FunctionCall) Value {
 			//a._setLengthInt(l, false)
 			a.values[l] = nil
 			a.values = a.values[:l]
-			a.length = l
-			return val
+		} else {
+			val = _undefined
 		}
-		return _undefined
+		if a.lengthProp.writable {
+			a.length = l
+		} else {
+			a.setLength(0, true) // will throw
+		}
+		return val
 	} else {
 		return r.arrayproto_pop_generic(obj)
 	}
@@ -173,7 +179,7 @@ func (r *Runtime) arrayproto_pop(call FunctionCall) Value {
 func (r *Runtime) arrayproto_join(call FunctionCall) Value {
 	o := call.This.ToObject(r)
 	l := int(toLength(o.self.getStr("length", nil)))
-	var sep valueString
+	var sep String
 	if s := call.Argument(0); s != _undefined {
 		sep = s.toString()
 	} else {
@@ -183,7 +189,7 @@ func (r *Runtime) arrayproto_join(call FunctionCall) Value {
 		return stringEmpty
 	}
 
-	var buf valueStringBuilder
+	var buf StringBuilder
 
 	element0 := o.self.getIdx(valueInt(0), nil)
 	if element0 != nil && element0 != _undefined && element0 != _null {
@@ -203,6 +209,16 @@ func (r *Runtime) arrayproto_join(call FunctionCall) Value {
 
 func (r *Runtime) arrayproto_toString(call FunctionCall) Value {
 	array := call.This.ToObject(r)
+	var toString func() Value
+	switch a := array.self.(type) {
+	case *objectGoSliceReflect:
+		toString = a.toString
+	case *objectGoArrayReflect:
+		toString = a.toString
+	}
+	if toString != nil {
+		return toString()
+	}
 	f := array.self.getStr("join", nil)
 	if fObj, ok := f.(*Object); ok {
 		if fcall, ok := fObj.self.assertCallable(); ok {
@@ -216,7 +232,7 @@ func (r *Runtime) arrayproto_toString(call FunctionCall) Value {
 	})
 }
 
-func (r *Runtime) writeItemLocaleString(item Value, buf *valueStringBuilder) {
+func (r *Runtime) writeItemLocaleString(item Value, buf *StringBuilder) {
 	if item != nil && item != _undefined && item != _null {
 		if f, ok := r.getVStr(item, "toLocaleString").(*Object); ok {
 			if c, ok := f.self.assertCallable(); ok {
@@ -233,7 +249,7 @@ func (r *Runtime) writeItemLocaleString(item Value, buf *valueStringBuilder) {
 
 func (r *Runtime) arrayproto_toLocaleString(call FunctionCall) Value {
 	array := call.This.ToObject(r)
-	var buf valueStringBuilder
+	var buf StringBuilder
 	if a := r.checkStdArrayObj(array); a != nil {
 		for i, item := range a.values {
 			if i > 0 {
@@ -313,7 +329,7 @@ func (r *Runtime) arrayproto_slice(call FunctionCall) Value {
 
 	a := arraySpeciesCreate(o, count)
 	if src := r.checkStdArrayObj(o); src != nil {
-		if dst, ok := a.self.(*arrayObject); ok {
+		if dst := r.checkStdArrayObjWithProto(a); dst != nil {
 			values := make([]Value, count)
 			copy(values, src.values[start:])
 			setArrayValues(dst, values)
@@ -347,9 +363,16 @@ func (r *Runtime) arrayproto_sort(call FunctionCall) Value {
 		}
 	}
 
+	var s sortable
 	if r.checkStdArrayObj(o) != nil {
+		s = o.self
+	} else if _, ok := o.self.(reflectValueWrapper); ok {
+		s = o.self
+	}
+
+	if s != nil {
 		ctx := arraySortCtx{
-			obj:     o.self,
+			obj:     s,
 			compare: compareFn,
 		}
 
@@ -392,11 +415,14 @@ func (r *Runtime) arrayproto_splice(call FunctionCall) Value {
 	default:
 		actualDeleteCount = min(max(call.Argument(1).ToInteger(), 0), length-actualStart)
 	}
-	a := arraySpeciesCreate(o, actualDeleteCount)
 	itemCount := max(int64(len(call.Arguments)-2), 0)
 	newLength := length - actualDeleteCount + itemCount
+	if newLength >= maxInt {
+		panic(r.NewTypeError("Invalid array length"))
+	}
+	a := arraySpeciesCreate(o, actualDeleteCount)
 	if src := r.checkStdArrayObj(o); src != nil {
-		if dst, ok := a.self.(*arrayObject); ok {
+		if dst := r.checkStdArrayObjWithProto(a); dst != nil {
 			values := make([]Value, actualDeleteCount)
 			copy(values, src.values[actualStart:])
 			setArrayValues(dst, values)
@@ -483,36 +509,58 @@ func (r *Runtime) arrayproto_unshift(call FunctionCall) Value {
 	length := toLength(o.self.getStr("length", nil))
 	argCount := int64(len(call.Arguments))
 	newLen := intToValue(length + argCount)
-	newSize := length + argCount
-	if arr := r.checkStdArrayObj(o); arr != nil && newSize < math.MaxUint32 {
-		if int64(cap(arr.values)) >= newSize {
-			arr.values = arr.values[:newSize]
-			copy(arr.values[argCount:], arr.values[:length])
-		} else {
-			values := make([]Value, newSize)
-			copy(values[argCount:], arr.values)
-			arr.values = values
+	if argCount > 0 {
+		newSize := length + argCount
+		if newSize >= maxInt {
+			panic(r.NewTypeError("Invalid array length"))
 		}
-		copy(arr.values, call.Arguments)
-		arr.objCount = int(arr.length)
-	} else {
-		for k := length - 1; k >= 0; k-- {
-			from := valueInt(k)
-			to := valueInt(k + argCount)
-			if o.self.hasPropertyIdx(from) {
-				o.self.setOwnIdx(to, nilSafe(o.self.getIdx(from, nil)), true)
+		if arr := r.checkStdArrayObjWithProto(o); arr != nil && newSize < math.MaxUint32 {
+			if int64(cap(arr.values)) >= newSize {
+				arr.values = arr.values[:newSize]
+				copy(arr.values[argCount:], arr.values[:length])
 			} else {
-				o.self.deleteIdx(to, true)
+				values := make([]Value, newSize)
+				copy(values[argCount:], arr.values)
+				arr.values = values
 			}
-		}
+			copy(arr.values, call.Arguments)
+			arr.objCount = int(arr.length)
+		} else {
+			for k := length - 1; k >= 0; k-- {
+				from := valueInt(k)
+				to := valueInt(k + argCount)
+				if o.self.hasPropertyIdx(from) {
+					o.self.setOwnIdx(to, nilSafe(o.self.getIdx(from, nil)), true)
+				} else {
+					o.self.deleteIdx(to, true)
+				}
+			}
 
-		for k, arg := range call.Arguments {
-			o.self.setOwnIdx(valueInt(int64(k)), arg, true)
+			for k, arg := range call.Arguments {
+				o.self.setOwnIdx(valueInt(int64(k)), arg, true)
+			}
 		}
 	}
 
 	o.self.setOwnStr("length", newLen, true)
 	return newLen
+}
+
+func (r *Runtime) arrayproto_at(call FunctionCall) Value {
+	o := call.This.ToObject(r)
+	idx := call.Argument(0).ToInteger()
+	length := toLength(o.self.getStr("length", nil))
+	if idx < 0 {
+		idx = length + idx
+	}
+	if idx >= length || idx < 0 {
+		return _undefined
+	}
+	i := valueInt(idx)
+	if o.self.hasPropertyIdx(i) {
+		return o.self.getIdx(i, nil)
+	}
+	return _undefined
 }
 
 func (r *Runtime) arrayproto_indexOf(call FunctionCall) Value {
@@ -877,15 +925,22 @@ func (r *Runtime) arrayproto_reduceRight(call FunctionCall) Value {
 func arrayproto_reverse_generic_step(o *Object, lower, upper int64) {
 	lowerP := valueInt(lower)
 	upperP := valueInt(upper)
-	lowerValue := o.self.getIdx(lowerP, nil)
-	upperValue := o.self.getIdx(upperP, nil)
-	if lowerValue != nil && upperValue != nil {
+	var lowerValue, upperValue Value
+	lowerExists := o.self.hasPropertyIdx(lowerP)
+	if lowerExists {
+		lowerValue = nilSafe(o.self.getIdx(lowerP, nil))
+	}
+	upperExists := o.self.hasPropertyIdx(upperP)
+	if upperExists {
+		upperValue = nilSafe(o.self.getIdx(upperP, nil))
+	}
+	if lowerExists && upperExists {
 		o.self.setOwnIdx(lowerP, upperValue, true)
 		o.self.setOwnIdx(upperP, lowerValue, true)
-	} else if lowerValue == nil && upperValue != nil {
+	} else if !lowerExists && upperExists {
 		o.self.setOwnIdx(lowerP, upperValue, true)
 		o.self.deleteIdx(upperP, true)
-	} else if lowerValue != nil && upperValue == nil {
+	} else if lowerExists && !upperExists {
 		o.self.deleteIdx(lowerP, true)
 		o.self.setOwnIdx(upperP, lowerValue, true)
 	}
@@ -917,8 +972,11 @@ func (r *Runtime) arrayproto_reverse(call FunctionCall) Value {
 
 func (r *Runtime) arrayproto_shift(call FunctionCall) Value {
 	o := call.This.ToObject(r)
-	if a := r.checkStdArrayObj(o); a != nil {
+	if a := r.checkStdArrayObjWithProto(o); a != nil {
 		if len(a.values) == 0 {
+			if !a.lengthProp.writable {
+				a.setLength(0, true) // will throw
+			}
 			return _undefined
 		}
 		first := a.values[0]
@@ -1067,6 +1125,46 @@ func (r *Runtime) arrayproto_findIndex(call FunctionCall) Value {
 	return intToValue(-1)
 }
 
+func (r *Runtime) arrayproto_findLast(call FunctionCall) Value {
+	o := call.This.ToObject(r)
+	l := toLength(o.self.getStr("length", nil))
+	predicate := r.toCallable(call.Argument(0))
+	fc := FunctionCall{
+		This:      call.Argument(1),
+		Arguments: []Value{nil, nil, o},
+	}
+	for k := int64(l - 1); k >= 0; k-- {
+		idx := valueInt(k)
+		kValue := o.self.getIdx(idx, nil)
+		fc.Arguments[0], fc.Arguments[1] = kValue, idx
+		if predicate(fc).ToBoolean() {
+			return kValue
+		}
+	}
+
+	return _undefined
+}
+
+func (r *Runtime) arrayproto_findLastIndex(call FunctionCall) Value {
+	o := call.This.ToObject(r)
+	l := toLength(o.self.getStr("length", nil))
+	predicate := r.toCallable(call.Argument(0))
+	fc := FunctionCall{
+		This:      call.Argument(1),
+		Arguments: []Value{nil, nil, o},
+	}
+	for k := int64(l - 1); k >= 0; k-- {
+		idx := valueInt(k)
+		kValue := o.self.getIdx(idx, nil)
+		fc.Arguments[0], fc.Arguments[1] = kValue, idx
+		if predicate(fc).ToBoolean() {
+			return idx
+		}
+	}
+
+	return intToValue(-1)
+}
+
 func (r *Runtime) arrayproto_flat(call FunctionCall) Value {
 	o := call.This.ToObject(r)
 	l := toLength(o.self.getStr("length", nil))
@@ -1126,6 +1224,177 @@ func (r *Runtime) arrayproto_flatMap(call FunctionCall) Value {
 	return a
 }
 
+func (r *Runtime) arrayproto_with(call FunctionCall) Value {
+	o := call.This.ToObject(r)
+	relativeIndex := call.Argument(0).ToInteger()
+	value := call.Argument(1)
+	length := toLength(o.self.getStr("length", nil))
+
+	actualIndex := int64(0)
+	if relativeIndex >= 0 {
+		actualIndex = relativeIndex
+	} else {
+		actualIndex = length + relativeIndex
+	}
+	if actualIndex >= length || actualIndex < 0 {
+		panic(r.newError(r.getRangeError(), "Invalid index %s", call.Argument(0).String()))
+	}
+
+	if src := r.checkStdArrayObj(o); src != nil {
+		a := make([]Value, 0, length)
+		for k := int64(0); k < length; k++ {
+			pk := valueInt(k)
+			var fromValue Value
+			if k == actualIndex {
+				fromValue = value
+			} else {
+				fromValue = src.values[pk]
+			}
+			a = append(a, fromValue)
+		}
+		return r.newArrayValues(a)
+	} else {
+		a := r.newArrayLength(length)
+		for k := int64(0); k < length; k++ {
+			pk := valueInt(k)
+			var fromValue Value
+			if k == actualIndex {
+				fromValue = value
+			} else {
+				fromValue = o.self.getIdx(pk, nil)
+			}
+			createDataPropertyOrThrow(a, pk, fromValue)
+		}
+		return a
+	}
+}
+
+func (r *Runtime) arrayproto_toReversed(call FunctionCall) Value {
+	o := call.This.ToObject(r)
+	length := toLength(o.self.getStr("length", nil))
+
+	if src := r.checkStdArrayObj(o); src != nil {
+		a := make([]Value, 0, length)
+		for k := int64(0); k < length; k++ {
+			from := valueInt(length - k - 1)
+			fromValue := src.values[from]
+			a = append(a, fromValue)
+		}
+		return r.newArrayValues(a)
+	} else {
+		a := r.newArrayLength(length)
+		for k := int64(0); k < length; k++ {
+			pk := valueInt(k)
+			from := valueInt(length - k - 1)
+			fromValue := o.self.getIdx(from, nil)
+			createDataPropertyOrThrow(a, pk, fromValue)
+		}
+		return a
+	}
+}
+
+func (r *Runtime) arrayproto_toSorted(call FunctionCall) Value {
+	var compareFn func(FunctionCall) Value
+	arg := call.Argument(0)
+	if arg != _undefined {
+		if arg, ok := arg.(*Object); ok {
+			compareFn, _ = arg.self.assertCallable()
+		}
+		if compareFn == nil {
+			panic(r.NewTypeError("The comparison function must be either a function or undefined"))
+		}
+	}
+
+	o := call.This.ToObject(r)
+	length := toLength(o.self.getStr("length", nil))
+	if length >= math.MaxUint32 {
+		panic(r.newError(r.getRangeError(), "Invalid array length"))
+	}
+	var a []Value
+
+	if src := r.checkStdArrayObj(o); src != nil {
+		a = make([]Value, length)
+		copy(a, src.values)
+	} else {
+		a = make([]Value, 0, length)
+		for i := int64(0); i < length; i++ {
+			idx := valueInt(i)
+			a = append(a, nilSafe(o.self.getIdx(idx, nil)))
+		}
+	}
+
+	ar := r.newArrayValues(a)
+	ctx := arraySortCtx{
+		obj:     ar.self,
+		compare: compareFn,
+	}
+
+	sort.Stable(&ctx)
+	return ar
+}
+
+func (r *Runtime) arrayproto_toSpliced(call FunctionCall) Value {
+	o := call.This.ToObject(r)
+	length := toLength(o.self.getStr("length", nil))
+	actualStart := relToIdx(call.Argument(0).ToInteger(), length)
+	var actualSkipCount int64
+	if len(call.Arguments) == 1 {
+		actualSkipCount = length - actualStart
+	} else if len(call.Arguments) > 1 {
+		actualSkipCount = min(max(call.Argument(1).ToInteger(), 0), length-actualStart)
+	}
+	itemCount := max(int64(len(call.Arguments)-2), 0)
+	newLength := length - actualSkipCount + itemCount
+	if newLength >= maxInt {
+		panic(r.NewTypeError("Invalid array length"))
+	}
+
+	if src := r.checkStdArrayObj(o); src != nil {
+		var values []Value
+		if itemCount == actualSkipCount {
+			values = make([]Value, len(src.values))
+			copy(values, src.values)
+		} else {
+			values = make([]Value, newLength)
+			copy(values, src.values[:actualStart])
+			copy(values[actualStart+itemCount:], src.values[actualStart+actualSkipCount:])
+		}
+		if itemCount > 0 {
+			copy(values[actualStart:], call.Arguments[2:])
+		}
+		return r.newArrayValues(values)
+	} else {
+		a := r.newArrayLength(newLength)
+		var i int64
+		rl := actualStart + actualSkipCount
+
+		for i < actualStart {
+			pi := valueInt(i)
+			iValue := nilSafe(o.self.getIdx(pi, nil))
+			createDataPropertyOrThrow(a, pi, iValue)
+			i++
+		}
+
+		if itemCount > 0 {
+			for _, item := range call.Arguments[2:] {
+				createDataPropertyOrThrow(a, valueInt(i), nilSafe(item))
+				i++
+			}
+		}
+
+		for i < newLength {
+			pi := valueInt(i)
+			from := valueInt(rl)
+			fromValue := nilSafe(o.self.getIdx(from, nil))
+			createDataPropertyOrThrow(a, pi, fromValue)
+			i++
+			rl++
+		}
+
+		return a
+	}
+}
+
 func (r *Runtime) checkStdArrayObj(obj *Object) *arrayObject {
 	if arr, ok := obj.self.(*arrayObject); ok &&
 		arr.propValueCount == 0 &&
@@ -1135,6 +1404,20 @@ func (r *Runtime) checkStdArrayObj(obj *Object) *arrayObject {
 		return arr
 	}
 
+	return nil
+}
+
+func (r *Runtime) checkStdArrayObjWithProto(obj *Object) *arrayObject {
+	if arr := r.checkStdArrayObj(obj); arr != nil {
+		if p1, ok := arr.prototype.self.(*arrayObject); ok && p1.propValueCount == 0 {
+			if p2, ok := p1.prototype.self.(*baseObject); ok && p2.prototype == nil {
+				p2.ensurePropOrder()
+				if p2.idxPropCount == 0 {
+					return arr
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -1148,7 +1431,7 @@ func (r *Runtime) checkStdArray(v Value) *arrayObject {
 
 func (r *Runtime) checkStdArrayIter(v Value) *arrayObject {
 	if arr := r.checkStdArray(v); arr != nil &&
-		arr.getSym(SymIterator, nil) == r.global.arrayValues {
+		arr.getSym(SymIterator, nil) == r.getArrayValues() {
 
 		return arr
 	}
@@ -1195,7 +1478,7 @@ func (r *Runtime) array_from(call FunctionCall) Value {
 		}
 		iter := r.getIterator(items, usingIterator)
 		if mapFn == nil {
-			if a := r.checkStdArrayObj(arr); a != nil {
+			if a := r.checkStdArrayObjWithProto(arr); a != nil {
 				var values []Value
 				iter.iterate(func(val Value) {
 					values = append(values, val)
@@ -1222,7 +1505,7 @@ func (r *Runtime) array_from(call FunctionCall) Value {
 			arr = r.newArrayValues(nil)
 		}
 		if mapFn == nil {
-			if a := r.checkStdArrayObj(arr); a != nil {
+			if a := r.checkStdArrayObjWithProto(arr); a != nil {
 				values := make([]Value, l)
 				for k := int64(0); k < l; k++ {
 					values[k] = nilSafe(arrayLike.self.getIdx(valueInt(k), nil))
@@ -1284,111 +1567,167 @@ func (r *Runtime) arrayIterProto_next(call FunctionCall) Value {
 	if iter, ok := thisObj.self.(*arrayIterObject); ok {
 		return iter.next()
 	}
-	panic(r.NewTypeError("Method Array Iterator.prototype.next called on incompatible receiver %s", thisObj.String()))
+	panic(r.NewTypeError("Method Array Iterator.prototype.next called on incompatible receiver %s", r.objectproto_toString(FunctionCall{This: thisObj})))
 }
 
-func (r *Runtime) createArrayProto(val *Object) objectImpl {
-	o := &arrayObject{
-		baseObject: baseObject{
-			class:      classArray,
-			val:        val,
-			extensible: true,
-			prototype:  r.global.ObjectPrototype,
-		},
+func createArrayProtoTemplate() *objectTemplate {
+	t := newObjectTemplate()
+	t.protoFactory = func(r *Runtime) *Object {
+		return r.global.ObjectPrototype
 	}
-	o.init()
 
-	o._putProp("constructor", r.global.Array, true, false, true)
-	o._putProp("concat", r.newNativeFunc(r.arrayproto_concat, nil, "concat", nil, 1), true, false, true)
-	o._putProp("copyWithin", r.newNativeFunc(r.arrayproto_copyWithin, nil, "copyWithin", nil, 2), true, false, true)
-	o._putProp("entries", r.newNativeFunc(r.arrayproto_entries, nil, "entries", nil, 0), true, false, true)
-	o._putProp("every", r.newNativeFunc(r.arrayproto_every, nil, "every", nil, 1), true, false, true)
-	o._putProp("fill", r.newNativeFunc(r.arrayproto_fill, nil, "fill", nil, 1), true, false, true)
-	o._putProp("filter", r.newNativeFunc(r.arrayproto_filter, nil, "filter", nil, 1), true, false, true)
-	o._putProp("find", r.newNativeFunc(r.arrayproto_find, nil, "find", nil, 1), true, false, true)
-	o._putProp("findIndex", r.newNativeFunc(r.arrayproto_findIndex, nil, "findIndex", nil, 1), true, false, true)
-	o._putProp("flat", r.newNativeFunc(r.arrayproto_flat, nil, "flat", nil, 0), true, false, true)
-	o._putProp("flatMap", r.newNativeFunc(r.arrayproto_flatMap, nil, "flatMap", nil, 1), true, false, true)
-	o._putProp("forEach", r.newNativeFunc(r.arrayproto_forEach, nil, "forEach", nil, 1), true, false, true)
-	o._putProp("includes", r.newNativeFunc(r.arrayproto_includes, nil, "includes", nil, 1), true, false, true)
-	o._putProp("indexOf", r.newNativeFunc(r.arrayproto_indexOf, nil, "indexOf", nil, 1), true, false, true)
-	o._putProp("join", r.newNativeFunc(r.arrayproto_join, nil, "join", nil, 1), true, false, true)
-	o._putProp("keys", r.newNativeFunc(r.arrayproto_keys, nil, "keys", nil, 0), true, false, true)
-	o._putProp("lastIndexOf", r.newNativeFunc(r.arrayproto_lastIndexOf, nil, "lastIndexOf", nil, 1), true, false, true)
-	o._putProp("map", r.newNativeFunc(r.arrayproto_map, nil, "map", nil, 1), true, false, true)
-	o._putProp("pop", r.newNativeFunc(r.arrayproto_pop, nil, "pop", nil, 0), true, false, true)
-	o._putProp("push", r.newNativeFunc(r.arrayproto_push, nil, "push", nil, 1), true, false, true)
-	o._putProp("reduce", r.newNativeFunc(r.arrayproto_reduce, nil, "reduce", nil, 1), true, false, true)
-	o._putProp("reduceRight", r.newNativeFunc(r.arrayproto_reduceRight, nil, "reduceRight", nil, 1), true, false, true)
-	o._putProp("reverse", r.newNativeFunc(r.arrayproto_reverse, nil, "reverse", nil, 0), true, false, true)
-	o._putProp("shift", r.newNativeFunc(r.arrayproto_shift, nil, "shift", nil, 0), true, false, true)
-	o._putProp("slice", r.newNativeFunc(r.arrayproto_slice, nil, "slice", nil, 2), true, false, true)
-	o._putProp("some", r.newNativeFunc(r.arrayproto_some, nil, "some", nil, 1), true, false, true)
-	o._putProp("sort", r.newNativeFunc(r.arrayproto_sort, nil, "sort", nil, 1), true, false, true)
-	o._putProp("splice", r.newNativeFunc(r.arrayproto_splice, nil, "splice", nil, 2), true, false, true)
-	o._putProp("toLocaleString", r.newNativeFunc(r.arrayproto_toLocaleString, nil, "toLocaleString", nil, 0), true, false, true)
-	o._putProp("toString", r.global.arrayToString, true, false, true)
-	o._putProp("unshift", r.newNativeFunc(r.arrayproto_unshift, nil, "unshift", nil, 1), true, false, true)
-	o._putProp("values", r.global.arrayValues, true, false, true)
+	t.putStr("length", func(r *Runtime) Value { return valueProp(_positiveZero, true, false, false) })
 
-	o._putSym(SymIterator, valueProp(r.global.arrayValues, true, false, true))
+	t.putStr("constructor", func(r *Runtime) Value { return valueProp(r.getArray(), true, false, true) })
 
-	bl := r.newBaseObject(nil, classObject)
-	bl.setOwnStr("copyWithin", valueTrue, true)
-	bl.setOwnStr("entries", valueTrue, true)
-	bl.setOwnStr("fill", valueTrue, true)
-	bl.setOwnStr("find", valueTrue, true)
-	bl.setOwnStr("findIndex", valueTrue, true)
-	bl.setOwnStr("flat", valueTrue, true)
-	bl.setOwnStr("flatMap", valueTrue, true)
-	bl.setOwnStr("includes", valueTrue, true)
-	bl.setOwnStr("keys", valueTrue, true)
-	bl.setOwnStr("values", valueTrue, true)
-	o._putSym(SymUnscopables, valueProp(bl.val, false, false, true))
+	t.putStr("at", func(r *Runtime) Value { return r.methodProp(r.arrayproto_at, "at", 1) })
+	t.putStr("concat", func(r *Runtime) Value { return r.methodProp(r.arrayproto_concat, "concat", 1) })
+	t.putStr("copyWithin", func(r *Runtime) Value { return r.methodProp(r.arrayproto_copyWithin, "copyWithin", 2) })
+	t.putStr("entries", func(r *Runtime) Value { return r.methodProp(r.arrayproto_entries, "entries", 0) })
+	t.putStr("every", func(r *Runtime) Value { return r.methodProp(r.arrayproto_every, "every", 1) })
+	t.putStr("fill", func(r *Runtime) Value { return r.methodProp(r.arrayproto_fill, "fill", 1) })
+	t.putStr("filter", func(r *Runtime) Value { return r.methodProp(r.arrayproto_filter, "filter", 1) })
+	t.putStr("find", func(r *Runtime) Value { return r.methodProp(r.arrayproto_find, "find", 1) })
+	t.putStr("findIndex", func(r *Runtime) Value { return r.methodProp(r.arrayproto_findIndex, "findIndex", 1) })
+	t.putStr("findLast", func(r *Runtime) Value { return r.methodProp(r.arrayproto_findLast, "findLast", 1) })
+	t.putStr("findLastIndex", func(r *Runtime) Value { return r.methodProp(r.arrayproto_findLastIndex, "findLastIndex", 1) })
+	t.putStr("flat", func(r *Runtime) Value { return r.methodProp(r.arrayproto_flat, "flat", 0) })
+	t.putStr("flatMap", func(r *Runtime) Value { return r.methodProp(r.arrayproto_flatMap, "flatMap", 1) })
+	t.putStr("forEach", func(r *Runtime) Value { return r.methodProp(r.arrayproto_forEach, "forEach", 1) })
+	t.putStr("includes", func(r *Runtime) Value { return r.methodProp(r.arrayproto_includes, "includes", 1) })
+	t.putStr("indexOf", func(r *Runtime) Value { return r.methodProp(r.arrayproto_indexOf, "indexOf", 1) })
+	t.putStr("join", func(r *Runtime) Value { return r.methodProp(r.arrayproto_join, "join", 1) })
+	t.putStr("keys", func(r *Runtime) Value { return r.methodProp(r.arrayproto_keys, "keys", 0) })
+	t.putStr("lastIndexOf", func(r *Runtime) Value { return r.methodProp(r.arrayproto_lastIndexOf, "lastIndexOf", 1) })
+	t.putStr("map", func(r *Runtime) Value { return r.methodProp(r.arrayproto_map, "map", 1) })
+	t.putStr("pop", func(r *Runtime) Value { return r.methodProp(r.arrayproto_pop, "pop", 0) })
+	t.putStr("push", func(r *Runtime) Value { return r.methodProp(r.arrayproto_push, "push", 1) })
+	t.putStr("reduce", func(r *Runtime) Value { return r.methodProp(r.arrayproto_reduce, "reduce", 1) })
+	t.putStr("reduceRight", func(r *Runtime) Value { return r.methodProp(r.arrayproto_reduceRight, "reduceRight", 1) })
+	t.putStr("reverse", func(r *Runtime) Value { return r.methodProp(r.arrayproto_reverse, "reverse", 0) })
+	t.putStr("shift", func(r *Runtime) Value { return r.methodProp(r.arrayproto_shift, "shift", 0) })
+	t.putStr("slice", func(r *Runtime) Value { return r.methodProp(r.arrayproto_slice, "slice", 2) })
+	t.putStr("some", func(r *Runtime) Value { return r.methodProp(r.arrayproto_some, "some", 1) })
+	t.putStr("sort", func(r *Runtime) Value { return r.methodProp(r.arrayproto_sort, "sort", 1) })
+	t.putStr("splice", func(r *Runtime) Value { return r.methodProp(r.arrayproto_splice, "splice", 2) })
+	t.putStr("toLocaleString", func(r *Runtime) Value { return r.methodProp(r.arrayproto_toLocaleString, "toLocaleString", 0) })
+	t.putStr("toString", func(r *Runtime) Value { return valueProp(r.getArrayToString(), true, false, true) })
+	t.putStr("unshift", func(r *Runtime) Value { return r.methodProp(r.arrayproto_unshift, "unshift", 1) })
+	t.putStr("with", func(r *Runtime) Value { return r.methodProp(r.arrayproto_with, "with", 2) })
+	t.putStr("toReversed", func(r *Runtime) Value { return r.methodProp(r.arrayproto_toReversed, "toReversed", 0) })
+	t.putStr("toSorted", func(r *Runtime) Value { return r.methodProp(r.arrayproto_toSorted, "toSorted", 1) })
+	t.putStr("toSpliced", func(r *Runtime) Value { return r.methodProp(r.arrayproto_toSpliced, "toSpliced", 2) })
+	t.putStr("values", func(r *Runtime) Value { return valueProp(r.getArrayValues(), true, false, true) })
 
-	return o
+	t.putSym(SymIterator, func(r *Runtime) Value { return valueProp(r.getArrayValues(), true, false, true) })
+	t.putSym(SymUnscopables, func(r *Runtime) Value {
+		bl := r.newBaseObject(nil, classObject)
+		bl.setOwnStr("copyWithin", valueTrue, true)
+		bl.setOwnStr("entries", valueTrue, true)
+		bl.setOwnStr("fill", valueTrue, true)
+		bl.setOwnStr("find", valueTrue, true)
+		bl.setOwnStr("findIndex", valueTrue, true)
+		bl.setOwnStr("findLast", valueTrue, true)
+		bl.setOwnStr("findLastIndex", valueTrue, true)
+		bl.setOwnStr("flat", valueTrue, true)
+		bl.setOwnStr("flatMap", valueTrue, true)
+		bl.setOwnStr("includes", valueTrue, true)
+		bl.setOwnStr("keys", valueTrue, true)
+		bl.setOwnStr("values", valueTrue, true)
+		bl.setOwnStr("groupBy", valueTrue, true)
+		bl.setOwnStr("groupByToMap", valueTrue, true)
+		bl.setOwnStr("toReversed", valueTrue, true)
+		bl.setOwnStr("toSorted", valueTrue, true)
+		bl.setOwnStr("toSpliced", valueTrue, true)
+
+		return valueProp(bl.val, false, false, true)
+	})
+
+	return t
+}
+
+var arrayProtoTemplate *objectTemplate
+var arrayProtoTemplateOnce sync.Once
+
+func getArrayProtoTemplate() *objectTemplate {
+	arrayProtoTemplateOnce.Do(func() {
+		arrayProtoTemplate = createArrayProtoTemplate()
+	})
+	return arrayProtoTemplate
+}
+
+func (r *Runtime) getArrayPrototype() *Object {
+	ret := r.global.ArrayPrototype
+	if ret == nil {
+		ret = &Object{runtime: r}
+		r.global.ArrayPrototype = ret
+		r.newTemplatedArrayObject(getArrayProtoTemplate(), ret)
+	}
+	return ret
+}
+
+func (r *Runtime) getArray() *Object {
+	ret := r.global.Array
+	if ret == nil {
+		ret = &Object{runtime: r}
+		ret.self = r.createArray(ret)
+		r.global.Array = ret
+	}
+	return ret
 }
 
 func (r *Runtime) createArray(val *Object) objectImpl {
-	o := r.newNativeFuncConstructObj(val, r.builtin_newArray, "Array", r.global.ArrayPrototype, 1)
-	o._putProp("from", r.newNativeFunc(r.array_from, nil, "from", nil, 1), true, false, true)
-	o._putProp("isArray", r.newNativeFunc(r.array_isArray, nil, "isArray", nil, 1), true, false, true)
-	o._putProp("of", r.newNativeFunc(r.array_of, nil, "of", nil, 0), true, false, true)
+	o := r.newNativeFuncConstructObj(val, r.builtin_newArray, "Array", r.getArrayPrototype(), 1)
+	o._putProp("from", r.newNativeFunc(r.array_from, "from", 1), true, false, true)
+	o._putProp("isArray", r.newNativeFunc(r.array_isArray, "isArray", 1), true, false, true)
+	o._putProp("of", r.newNativeFunc(r.array_of, "of", 0), true, false, true)
 	r.putSpeciesReturnThis(o)
 
 	return o
 }
 
 func (r *Runtime) createArrayIterProto(val *Object) objectImpl {
-	o := newBaseObjectObj(val, r.global.IteratorPrototype, classObject)
+	o := newBaseObjectObj(val, r.getIteratorPrototype(), classObject)
 
-	o._putProp("next", r.newNativeFunc(r.arrayIterProto_next, nil, "next", nil, 0), true, false, true)
+	o._putProp("next", r.newNativeFunc(r.arrayIterProto_next, "next", 0), true, false, true)
 	o._putSym(SymToStringTag, valueProp(asciiString(classArrayIterator), false, false, true))
 
 	return o
 }
 
-func (r *Runtime) initArray() {
-	r.global.arrayValues = r.newNativeFunc(r.arrayproto_values, nil, "values", nil, 0)
-	r.global.arrayToString = r.newNativeFunc(r.arrayproto_toString, nil, "toString", nil, 0)
+func (r *Runtime) getArrayValues() *Object {
+	ret := r.global.arrayValues
+	if ret == nil {
+		ret = r.newNativeFunc(r.arrayproto_values, "values", 0)
+		r.global.arrayValues = ret
+	}
+	return ret
+}
 
-	r.global.ArrayIteratorPrototype = r.newLazyObject(r.createArrayIterProto)
-	//r.global.ArrayPrototype = r.newArray(r.global.ObjectPrototype).val
-	//o := r.global.ArrayPrototype.self
-	r.global.ArrayPrototype = r.newLazyObject(r.createArrayProto)
+func (r *Runtime) getArrayToString() *Object {
+	ret := r.global.arrayToString
+	if ret == nil {
+		ret = r.newNativeFunc(r.arrayproto_toString, "toString", 0)
+		r.global.arrayToString = ret
+	}
+	return ret
+}
 
-	//r.global.Array = r.newNativeFuncConstruct(r.builtin_newArray, "Array", r.global.ArrayPrototype, 1)
-	//o = r.global.Array.self
-	//o._putProp("isArray", r.newNativeFunc(r.array_isArray, nil, "isArray", nil, 1), true, false, true)
-	r.global.Array = r.newLazyObject(r.createArray)
+func (r *Runtime) getArrayIteratorPrototype() *Object {
+	var o *Object
+	if o = r.global.ArrayIteratorPrototype; o == nil {
+		o = &Object{runtime: r}
+		r.global.ArrayIteratorPrototype = o
+		o.self = r.createArrayIterProto(o)
+	}
+	return o
 
-	r.addToGlobal("Array", r.global.Array)
 }
 
 type sortable interface {
-	sortLen() int64
-	sortGet(int64) Value
-	swap(int64, int64)
+	sortLen() int
+	sortGet(int) Value
+	swap(int, int)
 }
 
 type arraySortCtx struct {
@@ -1437,19 +1776,19 @@ func (a *arraySortCtx) sortCompare(x, y Value) int {
 		}
 		return 0
 	}
-	return x.toString().compareTo(y.toString())
+	return x.toString().CompareTo(y.toString())
 }
 
 // sort.Interface
 
 func (a *arraySortCtx) Len() int {
-	return int(a.obj.sortLen())
+	return a.obj.sortLen()
 }
 
 func (a *arraySortCtx) Less(j, k int) bool {
-	return a.sortCompare(a.obj.sortGet(int64(j)), a.obj.sortGet(int64(k))) < 0
+	return a.sortCompare(a.obj.sortGet(j), a.obj.sortGet(k)) < 0
 }
 
 func (a *arraySortCtx) Swap(j, k int) {
-	a.obj.swap(int64(j), int64(k))
+	a.obj.swap(j, k)
 }

@@ -17,7 +17,7 @@ func TestWeakSetBasic(t *testing.T) {
 		throw new Error("still has");
 	}
 	`
-	testScript1(SCRIPT, _undefined, t)
+	testScript(SCRIPT, _undefined, t)
 }
 
 func TestWeakSetArraySimple(t *testing.T) {
@@ -27,7 +27,7 @@ func TestWeakSetArraySimple(t *testing.T) {
 	var s = new WeakSet([o1, o2, o3]);
 	s.has(o1) && s.has(o2) && s.has(o3);
 	`
-	testScript1(SCRIPT, valueTrue, t)
+	testScript(SCRIPT, valueTrue, t)
 }
 
 func TestWeakSetArrayGeneric(t *testing.T) {
@@ -59,5 +59,43 @@ func TestWeakSetArrayGeneric(t *testing.T) {
 	s = new WeakSet(a);
 	s.has(o1) && s.has(o2) && s.has(o3);
 	`
-	testScript1(SCRIPT, valueTrue, t)
+	testScript(SCRIPT, valueTrue, t)
+}
+
+func TestWeakSetGetAdderGetIteratorOrder(t *testing.T) {
+	const SCRIPT = `
+	let getterCalled = 0;
+
+	class S extends WeakSet {
+	    get add() {
+	        getterCalled++;
+	        return null;
+	    }
+	}
+
+	let getIteratorCalled = 0;
+
+	let iterable = {};
+	iterable[Symbol.iterator] = () => {
+	    getIteratorCalled++
+	    return {
+	        next: 1
+	    };
+	}
+
+	let thrown = false;
+
+	try {
+	    new S(iterable);
+	} catch (e) {
+	    if (e instanceof TypeError) {
+	        thrown = true;
+	    } else {
+	        throw e;
+	    }
+	}
+
+	thrown && getterCalled === 1 && getIteratorCalled === 0;
+	`
+	testScript(SCRIPT, valueTrue, t)
 }

@@ -10,30 +10,33 @@ import (
 )
 
 const (
-	classObject   = "Object"
-	classArray    = "Array"
-	classWeakSet  = "WeakSet"
-	classWeakMap  = "WeakMap"
-	classMap      = "Map"
-	classMath     = "Math"
-	classSet      = "Set"
-	classFunction = "Function"
-	classNumber   = "Number"
-	classString   = "String"
-	classBoolean  = "Boolean"
-	classError    = "Error"
-	classAggError = "AggregateError"
-	classRegExp   = "RegExp"
-	classDate     = "Date"
-	classJSON     = "JSON"
-	classGlobal   = "global"
-	classPromise  = "Promise"
+	classObject        = "Object"
+	classArray         = "Array"
+	classWeakSet       = "WeakSet"
+	classWeakMap       = "WeakMap"
+	classMap           = "Map"
+	classMath          = "Math"
+	classSet           = "Set"
+	classFunction      = "Function"
+	classAsyncFunction = "AsyncFunction"
+	classNumber        = "Number"
+	classString        = "String"
+	classBoolean       = "Boolean"
+	classError         = "Error"
+	classRegExp        = "RegExp"
+	classDate          = "Date"
+	classJSON          = "JSON"
+	classGlobal        = "global"
+	classPromise       = "Promise"
 
 	classArrayIterator        = "Array Iterator"
 	classMapIterator          = "Map Iterator"
 	classSetIterator          = "Set Iterator"
 	classStringIterator       = "String Iterator"
 	classRegExpStringIterator = "RegExp String Iterator"
+
+	classGenerator         = "Generator"
+	classGeneratorFunction = "GeneratorFunction"
 )
 
 var (
@@ -142,12 +145,13 @@ func (p *PropertyDescriptor) complete() {
 type objectExportCacheItem map[reflect.Type]interface{}
 
 type objectExportCtx struct {
-	cache map[objectImpl]interface{}
+	cache map[*Object]interface{}
 }
 
 type objectImpl interface {
 	sortable
 	className() string
+	typeOf() String
 	getStr(p unistring.String, receiver Value) Value
 	getIdx(p valueInt, receiver Value) Value
 	getSym(p *Symbol, receiver Value) Value
@@ -180,10 +184,8 @@ type objectImpl interface {
 	deleteIdx(idx valueInt, throw bool) bool
 	deleteSym(s *Symbol, throw bool) bool
 
-	toPrimitiveNumber() Value
-	toPrimitiveString() Value
-	toPrimitive() Value
 	assertCallable() (call func(FunctionCall) Value, ok bool)
+	vmCall(vm *vm, n int)
 	assertConstructor() func(args []Value, newTarget *Object) *Object
 	proto() *Object
 	setProto(proto *Object, throw bool) bool
@@ -193,6 +195,8 @@ type objectImpl interface {
 
 	export(ctx *objectExportCtx) interface{}
 	exportType() reflect.Type
+	exportToMap(m reflect.Value, typ reflect.Type, ctx *objectExportCtx) error
+	exportToArrayOrSlice(s reflect.Value, typ reflect.Type, ctx *objectExportCtx) error
 	equal(objectImpl) bool
 
 	iterateStringKeys() iterNextFunc
@@ -205,6 +209,7 @@ type objectImpl interface {
 
 	_putProp(name unistring.String, value Value, writable, enumerable, configurable bool) Value
 	_putSym(s *Symbol, prop Value)
+	getPrivateEnv(typ *privateEnvType, create bool) *privateElements
 }
 
 type baseObject struct {
@@ -219,6 +224,8 @@ type baseObject struct {
 	lastSortedPropLen, idxPropCount int
 
 	symValues *orderedMap
+
+	privateElements map[*privateEnvType]*privateElements
 }
 
 type guardedObject struct {
@@ -270,6 +277,10 @@ func (o *baseObject) init() {
 
 func (o *baseObject) className() string {
 	return o.class
+}
+
+func (o *baseObject) typeOf() String {
+	return stringObjectC
 }
 
 func (o *baseObject) hasPropertyStr(name unistring.String) bool {
@@ -372,7 +383,10 @@ func (o *baseObject) getOwnPropStr(name unistring.String) Value {
 
 func (o *baseObject) checkDeleteProp(name unistring.String, prop *valueProperty, throw bool) bool {
 	if !prop.configurable {
-		o.val.runtime.typeErrorResult(throw, "Cannot delete property '%s' of %s", name, o.val.toString())
+		if throw {
+			r := o.val.runtime
+			panic(r.NewTypeError("Cannot delete property '%s' of %s", name, r.objectproto_toString(FunctionCall{This: o.val})))
+		}
 		return false
 	}
 	return true
@@ -585,9 +599,7 @@ func (o *baseObject) setForeignStr(name unistring.String, val, receiver Value, t
 
 func (o *baseObject) setForeignIdx(name valueInt, val, receiver Value, throw bool) (bool, bool) {
 	if idx := toIdx(name); idx != math.MaxUint32 {
-		if o.lastSortedPropLen != len(o.propNames) {
-			o.fixPropOrder()
-		}
+		o.ensurePropOrder()
 		if o.idxPropCount == 0 {
 			return o._setForeignIdx(name, name, nil, receiver, throw)
 		}
@@ -807,6 +819,23 @@ func (o *baseObject) _putSym(s *Symbol, prop Value) {
 	o.symValues.set(s, prop)
 }
 
+func (o *baseObject) getPrivateEnv(typ *privateEnvType, create bool) *privateElements {
+	env := o.privateElements[typ]
+	if env != nil && create {
+		panic(o.val.runtime.NewTypeError("Private fields for the class have already been set"))
+	}
+	if env == nil && create {
+		env = &privateElements{
+			fields: make([]Value, typ.numFields),
+		}
+		if o.privateElements == nil {
+			o.privateElements = make(map[*privateEnvType]*privateElements)
+		}
+		o.privateElements[typ] = env
+	}
+	return env
+}
+
 func (o *Object) tryPrimitive(methodName unistring.String) Value {
 	if method, ok := o.self.getStr(methodName, nil).(*Object); ok {
 		if call, ok := method.self.assertCallable(); ok {
@@ -821,7 +850,7 @@ func (o *Object) tryPrimitive(methodName unistring.String) Value {
 	return nil
 }
 
-func (o *Object) genericToPrimitiveNumber() Value {
+func (o *Object) ordinaryToPrimitiveNumber() Value {
 	if v := o.tryPrimitive("valueOf"); v != nil {
 		return v
 	}
@@ -833,11 +862,7 @@ func (o *Object) genericToPrimitiveNumber() Value {
 	panic(o.runtime.NewTypeError("Could not convert %v to primitive", o.self))
 }
 
-func (o *baseObject) toPrimitiveNumber() Value {
-	return o.val.genericToPrimitiveNumber()
-}
-
-func (o *Object) genericToPrimitiveString() Value {
+func (o *Object) ordinaryToPrimitiveString() Value {
 	if v := o.tryPrimitive("toString"); v != nil {
 		return v
 	}
@@ -846,19 +871,7 @@ func (o *Object) genericToPrimitiveString() Value {
 		return v
 	}
 
-	panic(o.runtime.NewTypeError("Could not convert %v to primitive", o.self))
-}
-
-func (o *Object) genericToPrimitive() Value {
-	return o.genericToPrimitiveNumber()
-}
-
-func (o *baseObject) toPrimitiveString() Value {
-	return o.val.genericToPrimitiveString()
-}
-
-func (o *baseObject) toPrimitive() Value {
-	return o.val.genericToPrimitiveNumber()
+	panic(o.runtime.NewTypeError("Could not convert %v (%T) to primitive", o.self, o.self))
 }
 
 func (o *Object) tryExoticToPrimitive(hint Value) Value {
@@ -881,7 +894,7 @@ func (o *Object) toPrimitiveNumber() Value {
 		return v
 	}
 
-	return o.self.toPrimitiveNumber()
+	return o.ordinaryToPrimitiveNumber()
 }
 
 func (o *Object) toPrimitiveString() Value {
@@ -889,18 +902,22 @@ func (o *Object) toPrimitiveString() Value {
 		return v
 	}
 
-	return o.self.toPrimitiveString()
+	return o.ordinaryToPrimitiveString()
 }
 
 func (o *Object) toPrimitive() Value {
 	if v := o.tryExoticToPrimitive(hintDefault); v != nil {
 		return v
 	}
-	return o.self.toPrimitive()
+	return o.ordinaryToPrimitiveNumber()
 }
 
 func (o *baseObject) assertCallable() (func(FunctionCall) Value, bool) {
 	return nil, false
+}
+
+func (o *baseObject) vmCall(vm *vm, _ int) {
+	panic(vm.r.NewTypeError("Not a function: %s", o.val.toString()))
 }
 
 func (o *baseObject) assertConstructor() func(args []Value, newTarget *Object) *Object {
@@ -920,15 +937,15 @@ func (o *baseObject) preventExtensions(bool) bool {
 	return true
 }
 
-func (o *baseObject) sortLen() int64 {
-	return toLength(o.val.self.getStr("length", nil))
+func (o *baseObject) sortLen() int {
+	return toIntStrict(toLength(o.val.self.getStr("length", nil)))
 }
 
-func (o *baseObject) sortGet(i int64) Value {
+func (o *baseObject) sortGet(i int) Value {
 	return o.val.self.getIdx(valueInt(i), nil)
 }
 
-func (o *baseObject) swap(i, j int64) {
+func (o *baseObject) swap(i int, j int) {
 	ii := valueInt(i)
 	jj := valueInt(j)
 
@@ -940,12 +957,12 @@ func (o *baseObject) swap(i, j int64) {
 }
 
 func (o *baseObject) export(ctx *objectExportCtx) interface{} {
-	if v, exists := ctx.get(o); exists {
+	if v, exists := ctx.get(o.val); exists {
 		return v
 	}
 	keys := o.stringKeys(false, nil)
 	m := make(map[string]interface{}, len(keys))
-	ctx.put(o, m)
+	ctx.put(o.val, m)
 	for _, itemName := range keys {
 		itemNameStr := itemName.String()
 		v := o.val.self.getStr(itemName.string(), nil)
@@ -961,6 +978,112 @@ func (o *baseObject) export(ctx *objectExportCtx) interface{} {
 
 func (o *baseObject) exportType() reflect.Type {
 	return reflectTypeMap
+}
+
+func genericExportToMap(o *Object, dst reflect.Value, typ reflect.Type, ctx *objectExportCtx) error {
+	dst.Set(reflect.MakeMap(typ))
+	ctx.putTyped(o, typ, dst.Interface())
+	keyTyp := typ.Key()
+	elemTyp := typ.Elem()
+	needConvertKeys := !reflectTypeString.AssignableTo(keyTyp)
+	iter := &enumerableIter{
+		o:       o,
+		wrapped: o.self.iterateStringKeys(),
+	}
+	r := o.runtime
+	for item, next := iter.next(); next != nil; item, next = next() {
+		var kv reflect.Value
+		var err error
+		if needConvertKeys {
+			kv = reflect.New(keyTyp).Elem()
+			err = r.toReflectValue(item.name, kv, ctx)
+			if err != nil {
+				return fmt.Errorf("could not convert map key %s to %v: %w", item.name.String(), typ, err)
+			}
+		} else {
+			kv = reflect.ValueOf(item.name.String())
+		}
+
+		ival := o.self.getStr(item.name.string(), nil)
+		if ival != nil {
+			vv := reflect.New(elemTyp).Elem()
+			err = r.toReflectValue(ival, vv, ctx)
+			if err != nil {
+				return fmt.Errorf("could not convert map value %v to %v at key %s: %w", ival, typ, item.name.String(), err)
+			}
+			dst.SetMapIndex(kv, vv)
+		} else {
+			dst.SetMapIndex(kv, reflect.Zero(elemTyp))
+		}
+	}
+
+	return nil
+}
+
+func (o *baseObject) exportToMap(m reflect.Value, typ reflect.Type, ctx *objectExportCtx) error {
+	return genericExportToMap(o.val, m, typ, ctx)
+}
+
+func genericExportToArrayOrSlice(o *Object, dst reflect.Value, typ reflect.Type, ctx *objectExportCtx) (err error) {
+	r := o.runtime
+
+	if method := toMethod(r.getV(o, SymIterator)); method != nil {
+		// iterable
+
+		var values []Value
+		// cannot change (append to) the slice once it's been put into the cache, so we need to know its length beforehand
+		ex := r.try(func() {
+			values = r.iterableToList(o, method)
+		})
+		if ex != nil {
+			return ex
+		}
+		if typ.Kind() == reflect.Array {
+			if dst.Len() != len(values) {
+				return fmt.Errorf("cannot convert an iterable into an array, lengths mismatch (have %d, need %d)", len(values), dst.Len())
+			}
+		} else {
+			dst.Set(reflect.MakeSlice(typ, len(values), len(values)))
+		}
+		ctx.putTyped(o, typ, dst.Interface())
+		for i, val := range values {
+			err = r.toReflectValue(val, dst.Index(i), ctx)
+			if err != nil {
+				return
+			}
+		}
+	} else {
+		// array-like
+		var lp Value
+		if _, ok := o.self.assertCallable(); !ok {
+			lp = o.self.getStr("length", nil)
+		}
+		if lp == nil {
+			return fmt.Errorf("cannot convert %v to %v: not an array or iterable", o, typ)
+		}
+		l := toIntStrict(toLength(lp))
+		if dst.Len() != l {
+			if typ.Kind() == reflect.Array {
+				return fmt.Errorf("cannot convert an array-like object into an array, lengths mismatch (have %d, need %d)", l, dst.Len())
+			} else {
+				dst.Set(reflect.MakeSlice(typ, l, l))
+			}
+		}
+		ctx.putTyped(o, typ, dst.Interface())
+		for i := 0; i < l; i++ {
+			val := nilSafe(o.self.getIdx(valueInt(i), nil))
+			err = r.toReflectValue(val, dst.Index(i), ctx)
+			if err != nil {
+				return
+			}
+		}
+	}
+
+	return
+}
+
+func (o *baseObject) exportToArrayOrSlice(dst reflect.Value, typ reflect.Type, ctx *objectExportCtx) error {
+	return genericExportToArrayOrSlice(o.val, dst, typ, ctx)
 }
 
 type enumerableFlag int
@@ -1125,9 +1248,7 @@ func copyNamesIfNeeded(names []unistring.String, extraCap int) []unistring.Strin
 }
 
 func (o *baseObject) iterateStringKeys() iterNextFunc {
-	if len(o.propNames) > o.lastSortedPropLen {
-		o.fixPropOrder()
-	}
+	o.ensurePropOrder()
 	propNames := prepareNamesForCopy(o.propNames)
 	o.propNames = propNames
 	return (&objectPropIter{
@@ -1188,6 +1309,13 @@ func (o *baseObject) equal(objectImpl) bool {
 	return false
 }
 
+// hopefully this gets inlined
+func (o *baseObject) ensurePropOrder() {
+	if o.lastSortedPropLen < len(o.propNames) {
+		o.fixPropOrder()
+	}
+}
+
 // Reorder property names so that any integer properties are shifted to the beginning of the list
 // in ascending order. This is to conform to https://262.ecma-international.org/#sec-ordinaryownpropertykeys.
 // Personally I think this requirement is strange. I can sort of understand where they are coming from,
@@ -1223,9 +1351,7 @@ func (o *baseObject) fixPropOrder() {
 }
 
 func (o *baseObject) stringKeys(all bool, keys []Value) []Value {
-	if len(o.propNames) > o.lastSortedPropLen {
-		o.fixPropOrder()
-	}
+	o.ensurePropOrder()
 	if all {
 		for _, k := range o.propNames {
 			keys = append(keys, stringValueFromRaw(k))
@@ -1289,7 +1415,7 @@ func toMethod(v Value) func(FunctionCall) Value {
 			return call
 		}
 	}
-	panic(typeError(fmt.Sprintf("%s is not a method", v.String())))
+	panic(newTypeError("%s is not a method", v.String()))
 }
 
 func instanceOfOperator(o Value, c *Object) bool {
@@ -1558,10 +1684,10 @@ func (o *guardedObject) deleteStr(name unistring.String, throw bool) bool {
 	return res
 }
 
-func (ctx *objectExportCtx) get(key objectImpl) (interface{}, bool) {
+func (ctx *objectExportCtx) get(key *Object) (interface{}, bool) {
 	if v, exists := ctx.cache[key]; exists {
 		if item, ok := v.(objectExportCacheItem); ok {
-			r, exists := item[key.exportType()]
+			r, exists := item[key.self.exportType()]
 			return r, exists
 		} else {
 			return v, true
@@ -1570,7 +1696,7 @@ func (ctx *objectExportCtx) get(key objectImpl) (interface{}, bool) {
 	return nil, false
 }
 
-func (ctx *objectExportCtx) getTyped(key objectImpl, typ reflect.Type) (interface{}, bool) {
+func (ctx *objectExportCtx) getTyped(key *Object, typ reflect.Type) (interface{}, bool) {
 	if v, exists := ctx.cache[key]; exists {
 		if item, ok := v.(objectExportCacheItem); ok {
 			r, exists := item[typ]
@@ -1584,20 +1710,20 @@ func (ctx *objectExportCtx) getTyped(key objectImpl, typ reflect.Type) (interfac
 	return nil, false
 }
 
-func (ctx *objectExportCtx) put(key objectImpl, value interface{}) {
+func (ctx *objectExportCtx) put(key *Object, value interface{}) {
 	if ctx.cache == nil {
-		ctx.cache = make(map[objectImpl]interface{})
+		ctx.cache = make(map[*Object]interface{})
 	}
 	if item, ok := ctx.cache[key].(objectExportCacheItem); ok {
-		item[key.exportType()] = value
+		item[key.self.exportType()] = value
 	} else {
 		ctx.cache[key] = value
 	}
 }
 
-func (ctx *objectExportCtx) putTyped(key objectImpl, typ reflect.Type, value interface{}) {
+func (ctx *objectExportCtx) putTyped(key *Object, typ reflect.Type, value interface{}) {
 	if ctx.cache == nil {
-		ctx.cache = make(map[objectImpl]interface{})
+		ctx.cache = make(map[*Object]interface{})
 	}
 	v, exists := ctx.cache[key]
 	if exists {
@@ -1605,7 +1731,7 @@ func (ctx *objectExportCtx) putTyped(key objectImpl, typ reflect.Type, value int
 			item[typ] = value
 		} else {
 			m := make(objectExportCacheItem, 2)
-			m[key.exportType()] = v
+			m[key.self.exportType()] = v
 			m[typ] = value
 			ctx.cache[key] = m
 		}
@@ -1661,4 +1787,38 @@ func iterateEnumerableStringProperties(o *Object) iterNextFunc {
 			wrapped: o.self.iterateStringKeys(),
 		}).next,
 	}).next
+}
+
+type privateId struct {
+	typ      *privateEnvType
+	name     unistring.String
+	idx      uint32
+	isMethod bool
+}
+
+type privateEnvType struct {
+	numFields, numMethods uint32
+}
+
+type privateNames map[unistring.String]*privateId
+
+type privateEnv struct {
+	instanceType, staticType *privateEnvType
+
+	names privateNames
+
+	outer *privateEnv
+}
+
+type privateElements struct {
+	methods []Value
+	fields  []Value
+}
+
+func (i *privateId) String() string {
+	return "#" + i.name.String()
+}
+
+func (i *privateId) string() unistring.String {
+	return privateIdString(i.name)
 }

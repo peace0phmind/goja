@@ -39,6 +39,15 @@ func TestLexer(t *testing.T) {
 			token.EOF, "", 1,
 		)
 
+		test("#!",
+			token.EOF, "", 3,
+		)
+
+		test("#!\n1",
+			token.NUMBER, "1", 4,
+			token.EOF, "", 5,
+		)
+
 		test("1",
 			token.NUMBER, "1", 1,
 			token.EOF, "", 2,
@@ -200,7 +209,7 @@ Second line \
 			token.VAR, "var", 1,
 			token.IF, "if", 5,
 			token.VAR, "var", 8,
-			token.KEYWORD, "class", 12,
+			token.CLASS, "class", 12,
 			token.EOF, "", 17,
 		)
 
@@ -253,6 +262,28 @@ Second line \
 		test("1.2 12.3",
 			token.NUMBER, "1.2", 1,
 			token.NUMBER, "12.3", 5,
+		)
+
+		test("1_000 1_000_000",
+			token.NUMBER, "1_000", 1,
+			token.NUMBER, "1_000_000", 7,
+		)
+
+		test(`1n`,
+			token.NUMBER, "1n", 1,
+		)
+
+		test(`1n 9007199254740991n`,
+			token.NUMBER, "1n", 1,
+			token.NUMBER, "9007199254740991n", 4,
+		)
+
+		test(`0xabn`,
+			token.NUMBER, "0xabn", 1,
+		)
+
+		test(`0xabcdef0123456789abcdef0123n`,
+			token.NUMBER, "0xabcdef0123456789abcdef0123n", 1,
 		)
 
 		test("/ /=",
@@ -338,6 +369,20 @@ Second line \
 			token.NUMBER, "1", 1,
 			token.LEFT_BRACKET, "", 5,
 			token.RIGHT_BRACKET, "", 6,
+		)
+
+		test("x ?.30 : false",
+			token.IDENTIFIER, "x", 1,
+			token.QUESTION_MARK, "", 3,
+			token.NUMBER, ".30", 4,
+			token.COLON, "", 8,
+			token.BOOLEAN, "false", 10,
+		)
+
+		test("a\n?.b",
+			token.IDENTIFIER, "a", 1,
+			token.QUESTION_DOT, "", 3,
+			token.IDENTIFIER, "b", 5,
 		)
 
 		// ILLEGAL

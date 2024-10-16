@@ -3,6 +3,7 @@ package goja
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -89,7 +90,7 @@ func TestPropertyOrder(t *testing.T) {
 	}
 	`
 
-	testScript1(SCRIPT, _undefined, t)
+	testScript(SCRIPT, _undefined, t)
 }
 
 func TestDefinePropertiesSymbol(t *testing.T) {
@@ -101,7 +102,7 @@ func TestDefinePropertiesSymbol(t *testing.T) {
 	o[Symbol.toStringTag] === "Test";
 	`
 
-	testScript1(SCRIPT, valueTrue, t)
+	testScript(SCRIPT, valueTrue, t)
 }
 
 func TestObjectShorthandProperties(t *testing.T) {
@@ -118,7 +119,7 @@ func TestObjectShorthandProperties(t *testing.T) {
 
 	assert.sameValue(obj['with'](), 42, 'property exists');
 	`
-	testScript1(TESTLIB+SCRIPT, _undefined, t)
+	testScriptWithTestLib(SCRIPT, _undefined, t)
 }
 
 func TestObjectAssign(t *testing.T) {
@@ -134,7 +135,7 @@ func TestObjectAssign(t *testing.T) {
           delete this.b;
         }, b: 2 }).b, 1, "#2");
 	`
-	testScript1(TESTLIB+SCRIPT, _undefined, t)
+	testScriptWithTestLib(SCRIPT, _undefined, t)
 }
 
 func TestExportCircular(t *testing.T) {
@@ -297,6 +298,157 @@ func TestExportToWrappedMapCustom(t *testing.T) {
 	}
 }
 
+func TestExportToSliceNonIterable(t *testing.T) {
+	vm := New()
+	o := vm.NewObject()
+	var a []interface{}
+	err := vm.ExportTo(o, &a)
+	if err == nil {
+		t.Fatal("Expected an error")
+	}
+	if len(a) != 0 {
+		t.Fatalf("a: %v", a)
+	}
+	if msg := err.Error(); msg != "cannot convert [object Object] to []interface {}: not an array or iterable" {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+}
+
+func ExampleRuntime_ExportTo_iterableToSlice() {
+	vm := New()
+	v, err := vm.RunString(`
+	function reverseIterator() {
+	    const arr = this;
+	    let idx = arr.length;
+	    return {
+			next: () => idx > 0 ? {value: arr[--idx]} : {done: true}
+	    }
+	}
+	const arr = [1,2,3];
+	arr[Symbol.iterator] = reverseIterator;
+	arr;
+	`)
+	if err != nil {
+		panic(err)
+	}
+
+	var arr []int
+	err = vm.ExportTo(v, &arr)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(arr)
+	// Output: [3 2 1]
+}
+
+func TestRuntime_ExportTo_proxiedIterableToSlice(t *testing.T) {
+	vm := New()
+	v, err := vm.RunString(`
+	function reverseIterator() {
+	    const arr = this;
+	    let idx = arr.length;
+	    return {
+			next: () => idx > 0 ? {value: arr[--idx]} : {done: true}
+	    }
+	}
+	const arr = [1,2,3];
+	arr[Symbol.iterator] = reverseIterator;
+	new Proxy(arr, {});
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var arr []int
+	err = vm.ExportTo(v, &arr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := fmt.Sprint(arr); out != "[3 2 1]" {
+		t.Fatal(out)
+	}
+}
+
+func ExampleRuntime_ExportTo_arrayLikeToSlice() {
+	vm := New()
+	v, err := vm.RunString(`
+	({
+		length: 3,
+		0: 1,
+		1: 2,
+		2: 3
+	});
+	`)
+	if err != nil {
+		panic(err)
+	}
+
+	var arr []int
+	err = vm.ExportTo(v, &arr)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(arr)
+	// Output: [1 2 3]
+}
+
+func TestExportArrayToArrayMismatchedLengths(t *testing.T) {
+	vm := New()
+	a := vm.NewArray(1, 2)
+	var a1 [3]int
+	err := vm.ExportTo(a, &a1)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "lengths mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExportIterableToArrayMismatchedLengths(t *testing.T) {
+	vm := New()
+	a, err := vm.RunString(`
+		new Map([[1, true], [2, true]]);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var a1 [3]interface{}
+	err = vm.ExportTo(a, &a1)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "lengths mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExportArrayLikeToArrayMismatchedLengths(t *testing.T) {
+	vm := New()
+	a, err := vm.RunString(`
+		({
+			length: 2,
+			0: true,
+			1: true
+		});
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var a1 [3]interface{}
+	err = vm.ExportTo(a, &a1)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "lengths mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestSetForeignReturnValue(t *testing.T) {
 	const SCRIPT = `
 	var array = [1, 2, 3];
@@ -307,7 +459,7 @@ func TestSetForeignReturnValue(t *testing.T) {
 	!Reflect.set(arrayTarget, "foo", 2);
 	`
 
-	testScript1(SCRIPT, valueTrue, t)
+	testScript(SCRIPT, valueTrue, t)
 }
 
 func TestDefinePropertiesUndefinedVal(t *testing.T) {
@@ -329,7 +481,7 @@ Object.defineProperties({}, proxy);
 	true;
 	`
 
-	testScript1(SCRIPT, valueTrue, t)
+	testScript(SCRIPT, valueTrue, t)
 }
 
 func ExampleObject_Delete() {
@@ -341,6 +493,29 @@ func ExampleObject_Delete() {
 	after := obj.Get("test")
 	fmt.Printf("before: %v, after: %v", before, after)
 	// Output: before: true, after: <nil>
+}
+
+func ExampleObject_GetOwnPropertyNames() {
+	vm := New()
+	obj := vm.NewObject()
+	obj.DefineDataProperty("test", vm.ToValue(true), FLAG_TRUE, FLAG_TRUE, FLAG_FALSE) // define a non-enumerable property that Keys() would not return
+	fmt.Print(obj.GetOwnPropertyNames())
+	// Output: [test]
+}
+
+func TestObjectEquality(t *testing.T) {
+	type CustomInt int
+	type S struct {
+		F CustomInt
+	}
+	vm := New()
+	vm.Set("s", S{})
+	// indexOf() and includes() use different equality checks (StrictEquals and SameValueZero respectively),
+	// but for objects they must behave the same. De-referencing s.F creates a new wrapper each time.
+	vm.testScriptWithTestLib(`
+	assert.sameValue([s.F].indexOf(s.F), 0, "indexOf");
+	assert([s.F].includes(s.F));
+	`, _undefined, t)
 }
 
 func BenchmarkPut(b *testing.B) {
@@ -452,7 +627,7 @@ func BenchmarkConv(b *testing.B) {
 }
 
 func BenchmarkToUTF8String(b *testing.B) {
-	var s valueString = asciiString("test")
+	var s String = asciiString("test")
 	for i := 0; i < b.N; i++ {
 		_ = s.String()
 	}
@@ -481,9 +656,9 @@ func BenchmarkAddString(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		var z Value
-		if xi, ok := x.(valueString); ok {
-			if yi, ok := y.(valueString); ok {
-				z = xi.concat(yi)
+		if xi, ok := x.(String); ok {
+			if yi, ok := y.(String); ok {
+				z = xi.Concat(yi)
 			}
 		}
 		if !z.StrictEquals(tst) {

@@ -2,6 +2,7 @@ package parser
 
 import (
 	"errors"
+	"math/big"
 	"regexp"
 	"strings"
 	"testing"
@@ -197,6 +198,9 @@ func TestParserErr(t *testing.T) {
 
 		test("\n/* Some multiline\ncomment */\n)", "(anonymous): Line 4:1 Unexpected token )")
 
+		test("+1 ** 2", "(anonymous): Line 1:4 Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence")
+		test("typeof 1 ** 2", "(anonymous): Line 1:10 Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence")
+
 		// TODO
 		//{ set 1 }
 		//{ get 2 }
@@ -234,7 +238,7 @@ func TestParserErr(t *testing.T) {
 
 		test("a if", "(anonymous): Line 1:3 Unexpected token if")
 
-		test("a class", "(anonymous): Line 1:3 Unexpected reserved word")
+		test("a class", "(anonymous): Line 1:3 Unexpected token class")
 
 		test("break\n", "(anonymous): Line 1:1 Illegal break statement")
 
@@ -379,7 +383,7 @@ func TestParserErr(t *testing.T) {
 
 		test("/*/.source", "(anonymous): Line 1:11 Unexpected end of input")
 
-		test("var class", "(anonymous): Line 1:5 Unexpected reserved word")
+		test("var class", "(anonymous): Line 1:5 Unexpected token class")
 
 		test("var if", "(anonymous): Line 1:5 Unexpected token if")
 
@@ -413,9 +417,9 @@ func TestParserErr(t *testing.T) {
 
 		{ // Reserved words
 
-			test("class", "(anonymous): Line 1:1 Unexpected reserved word")
+			test("class", "(anonymous): Line 1:6 Unexpected end of input")
 			test("abc.class = 1", nil)
-			test("var class;", "(anonymous): Line 1:5 Unexpected reserved word")
+			test("var class;", "(anonymous): Line 1:5 Unexpected token class")
 
 			test("const", "(anonymous): Line 1:6 Unexpected end of input")
 			test("abc.const = 1", nil)
@@ -429,17 +433,17 @@ func TestParserErr(t *testing.T) {
 			test("abc.export = 1", nil)
 			test("var export;", "(anonymous): Line 1:5 Unexpected reserved word")
 
-			test("extends", "(anonymous): Line 1:1 Unexpected reserved word")
+			test("extends", "(anonymous): Line 1:1 Unexpected token extends")
 			test("abc.extends = 1", nil)
-			test("var extends;", "(anonymous): Line 1:5 Unexpected reserved word")
+			test("var extends;", "(anonymous): Line 1:5 Unexpected token extends")
 
 			test("import", "(anonymous): Line 1:1 Unexpected reserved word")
 			test("abc.import = 1", nil)
 			test("var import;", "(anonymous): Line 1:5 Unexpected reserved word")
 
-			test("super", "(anonymous): Line 1:1 Unexpected reserved word")
+			test("super", "(anonymous): Line 1:1 'super' keyword unexpected here")
 			test("abc.super = 1", nil)
-			test("var super;", "(anonymous): Line 1:5 Unexpected reserved word")
+			test("var super;", "(anonymous): Line 1:5 Unexpected token super")
 			test(`
 			obj = {
 			  aaa: 1
@@ -494,6 +498,20 @@ func TestParserErr(t *testing.T) {
 		}
 		test(`0, { get a(param = null) {} };`, "(anonymous): Line 1:11 Getter must not have any formal parameters.")
 		test(`let{f(`, "(anonymous): Line 1:7 Unexpected end of input")
+		test("`", "(anonymous): Line 1:2 Unexpected end of input")
+		test(" `", "(anonymous): Line 1:3 Unexpected end of input")
+		test("` ", "(anonymous): Line 1:3 Unexpected end of input")
+		test(`var{..(`, "(anonymous): Line 1:7 Unexpected token ILLEGAL")
+		test(`var{get..(`, "(anonymous): Line 1:10 Unexpected token ILLEGAL")
+		test(`var{set..(`, "(anonymous): Line 1:10 Unexpected token ILLEGAL")
+		test(`(0 ?? 0 || true)`, "(anonymous): Line 1:9 Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
+		test(`(a || b ?? c)`, "(anonymous): Line 1:9 Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
+		test(`2 ?? 2 && 3 + 3`, "(anonymous): Line 1:3 Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
+		test(`
+		class C {
+            st\u0061tic m() {}
+		}
+		`, "(anonymous): Line 3:25 Unexpected identifier")
 	})
 }
 
@@ -893,6 +911,38 @@ func TestParser(t *testing.T) {
 		test(`ref = (a, b = 39,) => {
 		};`, nil)
 		test(`(a,) => {}`, nil)
+
+		test(`2 ?? (2 && 3) + 3`, nil)
+		test(`(2 ?? 2) && 3 + 3`, nil)
+		program = test(`a ?? b ?? c`, nil)
+		is(len(program.Body), 1)
+		is(program.Body[0].(*ast.ExpressionStatement).Expression.(*ast.BinaryExpression).Right.(*ast.Identifier).Name, "c")
+
+		program = test(`
+		class C {
+			a
+			b
+			#c
+			m() {
+				return this.#c;
+			}
+		}
+		`, nil)
+		is(len(program.Body), 1)
+
+		{
+			program := test(`(-2)**53`, nil)
+			st := program.Body[0].(*ast.ExpressionStatement).Expression.(*ast.BinaryExpression)
+			is(st.Operator, token.EXPONENT)
+			left := st.Left.(*ast.UnaryExpression)
+			is(left.Operator, token.MINUS)
+			op1 := left.Operand.(*ast.NumberLiteral)
+			is(op1.Literal, "2")
+
+			right := st.Right.(*ast.NumberLiteral)
+			is(right.Literal, "53")
+		}
+
 	})
 }
 
@@ -992,6 +1042,18 @@ func Test_parseNumberLiteral(t *testing.T) {
 		test("0", 0)
 
 		test("0x8000000000000000", float64(9.223372036854776e+18))
+
+		test("1n", big.NewInt(1))
+
+		test("-1n", big.NewInt(-1))
+
+		test("0x23n", big.NewInt(35))
+
+		test("0xabcdef01n", big.NewInt(2882400001))
+
+		var n big.Int
+		n.SetString("0xabcdef0123456789abcdef0123", 0)
+		test("0xabcdef0123456789abcdef0123n", &n)
 	})
 }
 
@@ -1038,6 +1100,83 @@ func TestPosition(t *testing.T) {
 		is(err, nil)
 		node = program.Body[0].(*ast.ExpressionStatement).Expression.(*ast.FunctionLiteral)
 		is(node.(*ast.FunctionLiteral).Source, "function(){ return abc; }")
+		node = program.Body[0].(*ast.ExpressionStatement).Expression.(*ast.FunctionLiteral).Body.List[0].(*ast.ReturnStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), "return abc")
+
+		parser = newParser("", "(function(){ return; })")
+		program, err = parser.parse()
+		is(err, nil)
+		node = program.Body[0].(*ast.ExpressionStatement).Expression.(*ast.FunctionLiteral).Body.List[0].(*ast.ReturnStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), "return")
+
+		parser = newParser("", "true ? 1 : 2")
+		program, err = parser.parse()
+		is(err, nil)
+		node = program.Body[0].(*ast.ExpressionStatement).Expression.(*ast.ConditionalExpression)
+		is(parser.slice(node.Idx0(), node.Idx1()), "true ? 1 : 2")
+
+		parser = newParser("", "a++")
+		program, err = parser.parse()
+		is(err, nil)
+		node = program.Body[0].(*ast.ExpressionStatement).Expression.(*ast.UnaryExpression)
+		is(parser.slice(node.Idx0(), node.Idx1()), "a++")
+
+		parser = newParser("", "++a")
+		program, err = parser.parse()
+		is(err, nil)
+		node = program.Body[0].(*ast.ExpressionStatement).Expression.(*ast.UnaryExpression)
+		is(parser.slice(node.Idx0(), node.Idx1()), "++a")
+
+		parser = newParser("", "xyz: for (i = 0; i < 10; i++) { if (i == 5) continue xyz; }")
+		program, err = parser.parse()
+		is(err, nil)
+		node = program.Body[0].(*ast.LabelledStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), "xyz: for (i = 0; i < 10; i++) { if (i == 5) continue xyz; }")
+		node = program.Body[0].(*ast.LabelledStatement).Statement.(*ast.ForStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), "for (i = 0; i < 10; i++) { if (i == 5) continue xyz; }")
+		block := program.Body[0].(*ast.LabelledStatement).Statement.(*ast.ForStatement).Body.(*ast.BlockStatement)
+		node = block.List[0].(*ast.IfStatement).Consequent.(*ast.BranchStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), "continue xyz")
+
+		parser = newParser("", "for (p in o) { break; }")
+		program, err = parser.parse()
+		is(err, nil)
+		node = program.Body[0].(*ast.ForInStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), "for (p in o) { break; }")
+		node = program.Body[0].(*ast.ForInStatement).Body.(*ast.BlockStatement).List[0].(*ast.BranchStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), "break")
+
+		parser = newParser("", "while (i < 10) { i++; }")
+		program, err = parser.parse()
+		is(err, nil)
+		node = program.Body[0].(*ast.WhileStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), "while (i < 10) { i++; }")
+
+		parser = newParser("", "do { i++; } while (i < 10 )")
+		program, err = parser.parse()
+		is(err, nil)
+		node = program.Body[0].(*ast.DoWhileStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), "do { i++; } while (i < 10 )")
+
+		parser = newParser("", "with (1) {}")
+		program, err = parser.parse()
+		is(err, nil)
+		node = program.Body[0].(*ast.WithStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), "with (1) {}")
+
+		parser = newParser("", `switch (a) {
+	case 1: x--;
+	case 2:
+	default: x++;
+}`)
+		program, err = parser.parse()
+		is(err, nil)
+		node = program.Body[0].(*ast.SwitchStatement)
+		is(parser.slice(node.Idx0(), node.Idx1()), `switch (a) {
+	case 1: x--;
+	case 2:
+	default: x++;
+}`)
 	})
 }
 
@@ -1166,6 +1305,25 @@ func TestParseTemplateLiteral(t *testing.T) {
 			}
 			if l := len(expr.Expressions); l != 1 {
 				t.Fatalf("len expressions: %d", l)
+			}
+		} else {
+			t.Fatal(st)
+		}
+	} else {
+		t.Fatal(prg.Body[0])
+	}
+}
+
+func TestParseTemplateLiteralWithTail(t *testing.T) {
+	parser := newParser("", "f()\n`test${a}tail` ")
+	prg, err := parser.parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, ok := prg.Body[0].(*ast.ExpressionStatement); ok {
+		if expr, ok := st.Expression.(*ast.TemplateLiteral); ok {
+			if expr.CloseQuote != 18 {
+				t.Fatalf("CloseQuote: %d", expr.CloseQuote)
 			}
 		} else {
 			t.Fatal(st)

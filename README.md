@@ -3,25 +3,25 @@ goja
 
 ECMAScript 5.1(+) implementation in Go.
 
-[![GoDoc](https://godoc.org/github.com/dop251/goja?status.svg)](https://godoc.org/github.com/dop251/goja)
+[![Go Reference](https://pkg.go.dev/badge/github.com/peace0phmind/goja.svg)](https://pkg.go.dev/github.com/peace0phmind/goja)
 
 Goja is an implementation of ECMAScript 5.1 in pure Go with emphasis on standard compliance and
 performance.
 
 This project was largely inspired by [otto](https://github.com/robertkrimen/otto).
 
-Minimum required Go version is 1.14.
+The minimum required Go version is 1.20.
 
 Features
 --------
 
  * Full ECMAScript 5.1 support (including regex and strict mode).
  * Passes nearly all [tc39 tests](https://github.com/tc39/test262) for the features implemented so far. The goal is to
-   pass all of them. Note, the current working commit is https://github.com/tc39/test262/commit/26f1f4567ee7e33163d961c867d689173cbb9065.
+   pass all of them. See .tc39_test262_checkout.sh for the latest working commit id.
  * Capable of running Babel, Typescript compiler and pretty much anything written in ES5.
  * Sourcemaps.
- * Most of ES6 functionality, still work in progress, see https://github.com/dop251/goja/milestone/1?closed=1
- 
+ * Most of ES6 functionality, still work in progress, see https://github.com/peace0phmind/goja/milestone/1?closed=1
+
 Known incompatibilities and caveats
 -----------------------------------
 
@@ -48,7 +48,7 @@ key = undefined; // Now it does
 The reason for it is the limitation of the Go runtime. At the time of writing (version 1.15) having a finalizer
 set on an object which is part of a reference cycle makes the whole cycle non-garbage-collectable. The solution
 above is the only reasonable way I can think of without involving finalizers. This is the third attempt
-(see https://github.com/dop251/goja/issues/250 and https://github.com/dop251/goja/issues/199 for more details).
+(see https://github.com/peace0phmind/goja/issues/250 and https://github.com/peace0phmind/goja/issues/199 for more details).
 
 Note, this does not have any effect on the application logic, but may cause a higher-than-expected memory usage.
 
@@ -77,10 +77,10 @@ FAQ
 
 ### How fast is it?
 
-Although it's faster than many scripting language implementations in Go I have seen 
+Although it's faster than many scripting language implementations in Go I have seen
 (for example it's 6-7 times faster than otto on average) it is not a
 replacement for V8 or SpiderMonkey or any other general-purpose JavaScript engine.
-You can find some benchmarks [here](https://github.com/dop251/goja/issues/2).
+You can find some benchmarks [here](https://github.com/peace0phmind/goja/issues/2).
 
 ### Why would I want to use it over a V8 wrapper?
 
@@ -99,20 +99,20 @@ It gives you a much better control over execution environment so can be useful f
 ### Is it goroutine-safe?
 
 No. An instance of goja.Runtime can only be used by a single goroutine
-at a time. You can create as many instances of Runtime as you like but 
+at a time. You can create as many instances of Runtime as you like but
 it's not possible to pass object values between runtimes.
 
 ### Where is setTimeout()?
 
 setTimeout() assumes concurrent execution of code which requires an execution
 environment, for example an event loop similar to nodejs or a browser.
-There is a [separate project](https://github.com/dop251/goja_nodejs) aimed at providing some NodeJS functionality,
+There is a [separate project](https://github.com/peace0phmind/goja_nodejs) aimed at providing some NodeJS functionality,
 and it includes an event loop.
 
 ### Can you implement (feature X from ES6 or higher)?
 
 I will be adding features in their dependency order and as quickly as time permits. Please do not ask
-for ETAs. Features that are open in the [milestone](https://github.com/dop251/goja/milestone/1) are either in progress
+for ETAs. Features that are open in the [milestone](https://github.com/peace0phmind/goja/milestone/1) are either in progress
 or will be worked on next.
 
 The ongoing work is done in separate feature branches which are merged into master when appropriate.
@@ -153,13 +153,13 @@ if num := v.Export().(int64); num != 4 {
 
 Passing Values to JS
 --------------------
-Any Go value can be passed to JS using Runtime.ToValue() method. See the method's [documentation](https://godoc.org/github.com/dop251/goja#Runtime.ToValue) for more details.
+Any Go value can be passed to JS using Runtime.ToValue() method. See the method's [documentation](https://pkg.go.dev/github.com/peace0phmind/goja#Runtime.ToValue) for more details.
 
 Exporting Values from JS
 ------------------------
 A JS value can be exported into its default Go representation using Value.Export() method.
 
-Alternatively it can be exported into a specific Go variable using [Runtime.ExportTo()](https://godoc.org/github.com/dop251/goja#Runtime.ExportTo) method.
+Alternatively it can be exported into a specific Go variable using [Runtime.ExportTo()](https://pkg.go.dev/github.com/peace0phmind/goja#Runtime.ExportTo) method.
 
 Within a single export operation the same Object will be represented by the same Go value (either the same map, slice or
 a pointer to the same struct). This includes circular objects and makes it possible to export them.
@@ -168,50 +168,52 @@ Calling JS functions from Go
 ----------------------------
 There are 2 approaches:
 
-- Using [AssertFunction()](https://godoc.org/github.com/dop251/goja#AssertFunction):
+- Using [AssertFunction()](https://pkg.go.dev/github.com/peace0phmind/goja#AssertFunction):
 ```go
-vm := New()
-_, err := vm.RunString(`
+const SCRIPT = `
 function sum(a, b) {
-    return a+b;
+    return +a + b;
 }
-`)
+`
+
+vm := goja.New()
+_, err := vm.RunString(SCRIPT)
 if err != nil {
     panic(err)
 }
-sum, ok := AssertFunction(vm.Get("sum"))
+sum, ok := goja.AssertFunction(vm.Get("sum"))
 if !ok {
     panic("Not a function")
 }
 
-res, err := sum(Undefined(), vm.ToValue(40), vm.ToValue(2))
+res, err := sum(goja.Undefined(), vm.ToValue(40), vm.ToValue(2))
 if err != nil {
     panic(err)
 }
 fmt.Println(res)
 // Output: 42
 ```
-- Using [Runtime.ExportTo()](https://godoc.org/github.com/dop251/goja#Runtime.ExportTo):
+- Using [Runtime.ExportTo()](https://pkg.go.dev/github.com/peace0phmind/goja#Runtime.ExportTo):
 ```go
 const SCRIPT = `
-function f(param) {
-    return +param + 2;
+function sum(a, b) {
+    return +a + b;
 }
 `
 
-vm := New()
+vm := goja.New()
 _, err := vm.RunString(SCRIPT)
 if err != nil {
     panic(err)
 }
 
-var fn func(string) string
-err = vm.ExportTo(vm.Get("f"), &fn)
+var sum func(int, int) int
+err = vm.ExportTo(vm.Get("sum"), &sum)
 if err != nil {
     panic(err)
 }
 
-fmt.Println(fn("40")) // note, _this_ value in the function will be undefined.
+fmt.Println(sum(40, 2)) // note, _this_ value in the function will be undefined.
 // Output: 42
 ```
 
@@ -222,10 +224,10 @@ Mapping struct field and method names
 -------------------------------------
 By default, the names are passed through as is which means they are capitalised. This does not match
 the standard JavaScript naming convention, so if you need to make your JS code look more natural or if you are
-dealing with a 3rd party library, you can use a [FieldNameMapper](https://godoc.org/github.com/dop251/goja#FieldNameMapper):
+dealing with a 3rd party library, you can use a [FieldNameMapper](https://pkg.go.dev/github.com/peace0phmind/goja#FieldNameMapper):
 
 ```go
-vm := New()
+vm := goja.New()
 vm.SetFieldNameMapper(TagFieldNameMapper("json", true))
 type S struct {
     Field int `json:"field"`
@@ -236,14 +238,14 @@ fmt.Println(res.Export())
 // Output: 42
 ```
 
-There are two standard mappers: [TagFieldNameMapper](https://godoc.org/github.com/dop251/goja#TagFieldNameMapper) and
-[UncapFieldNameMapper](https://godoc.org/github.com/dop251/goja#UncapFieldNameMapper), or you can use your own implementation.
+There are two standard mappers: [TagFieldNameMapper](https://pkg.go.dev/github.com/peace0phmind/goja#TagFieldNameMapper) and
+[UncapFieldNameMapper](https://pkg.go.dev/github.com/peace0phmind/goja#UncapFieldNameMapper), or you can use your own implementation.
 
 Native Constructors
 -------------------
 
 In order to implement a constructor function in Go use `func (goja.ConstructorCall) *goja.Object`.
-See [Runtime.ToValue()](https://godoc.org/github.com/dop251/goja#Runtime.ToValue) documentation for more details.
+See [Runtime.ToValue()](https://pkg.go.dev/github.com/peace0phmind/goja#Runtime.ToValue) documentation for more details.
 
 Regular Expressions
 -------------------
@@ -257,7 +259,7 @@ Any exception thrown in JavaScript is returned as an error of type *Exception. I
 by using the Value() method:
 
 ```go
-vm := New()
+vm := goja.New()
 _, err := vm.RunString(`
 
 throw("Test");
@@ -282,7 +284,7 @@ func Test() {
     panic(vm.ToValue("Error"))
 }
 
-vm = New()
+vm = goja.New()
 vm.Set("Test", Test)
 _, err := vm.RunString(`
 
@@ -313,7 +315,7 @@ func TestInterrupt(t *testing.T) {
     }
     `
 
-    vm := New()
+    vm := goja.New()
     time.AfterFunc(200 * time.Millisecond, func() {
         vm.Interrupt("halt")
     })
@@ -329,4 +331,4 @@ func TestInterrupt(t *testing.T) {
 NodeJS Compatibility
 --------------------
 
-There is a [separate project](https://github.com/dop251/goja_nodejs) aimed at providing some of the NodeJS functionality.
+There is a [separate project](https://github.com/peace0phmind/goja_nodejs) aimed at providing some of the NodeJS functionality.

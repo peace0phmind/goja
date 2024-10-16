@@ -9,7 +9,7 @@ func TestMean1(t *testing.T) {
 		12.34]
 	Math.mean(...a)
 	`
-	testScript1(SCRIPT, valueFloat(35.96333333333333), t)
+	testScript(SCRIPT, valueFloat(35.96333333333334), t)
 }
 
 func TestMean2(t *testing.T) {
@@ -19,7 +19,7 @@ func TestMean2(t *testing.T) {
 		12.34]
 	Math.mean(a)
 	`
-	testScript1(SCRIPT, valueFloat(35.96333333333333), t)
+	testScript(SCRIPT, valueFloat(35.96333333333334), t)
 }
 
 func TestMean3(t *testing.T) {
@@ -27,7 +27,7 @@ func TestMean3(t *testing.T) {
 	var a = [32.32]
 	Math.mean(a)
 	`
-	testScript1(SCRIPT, valueFloat(32.32), t)
+	testScript(SCRIPT, valueFloat(32.32), t)
 }
 
 func TestMean4(t *testing.T) {
@@ -35,7 +35,7 @@ func TestMean4(t *testing.T) {
 	var a = [32]
 	Math.mean(a)
 	`
-	testScript1(SCRIPT, floatToValue(32), t)
+	testScript(SCRIPT, floatToValue(32), t)
 }
 
 func TestMean5(t *testing.T) {
@@ -43,7 +43,7 @@ func TestMean5(t *testing.T) {
 	var a = [32, 23]
 	Math.mean(...a)
 	`
-	testScript1(SCRIPT, valueFloat(27.5), t)
+	testScript(SCRIPT, valueFloat(27.5), t)
 }
 
 func TestMedian(t *testing.T) {
@@ -53,7 +53,7 @@ func TestMedian(t *testing.T) {
 		12.34]
 	Math.median(...a)
 	`
-	testScript1(SCRIPT, valueFloat(43.34), t)
+	testScript(SCRIPT, valueFloat(43.34), t)
 }
 
 func TestVar(t *testing.T) {
@@ -63,7 +63,7 @@ func TestVar(t *testing.T) {
 		12.34]
 	Math.var(...a)
 	`
-	testScript1(SCRIPT, valueFloat(253.6061111111111), t)
+	testScript(SCRIPT, valueFloat(253.6061111111111), t)
 }
 
 func TestStd(t *testing.T) {
@@ -73,7 +73,7 @@ func TestStd(t *testing.T) {
 		12.34]
 	Math.std(...a)
 	`
-	testScript1(SCRIPT, valueFloat(15.925015262507948), t)
+	testScript(SCRIPT, valueFloat(15.925015262507948), t)
 }
 
 func TestStd1(t *testing.T) {
@@ -81,12 +81,12 @@ func TestStd1(t *testing.T) {
 	var a = [32.32]
 	Math.std(...a)
 	`
-	testScript1(SCRIPT, floatToValue(0), t)
+	testScript(SCRIPT, floatToValue(0), t)
 }
 
 func TestStd2(t *testing.T) {
 	const SCRIPT = `
 	Math.std()
 	`
-	testScript1(SCRIPT, _NaN, t)
+	testScript(SCRIPT, _NaN, t)
 }

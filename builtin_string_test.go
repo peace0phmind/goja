@@ -86,7 +86,7 @@ assert.sameValue('A—', String.fromCharCode(65, 0x2014));
 
 	`
 
-	testScript1(TESTLIB+SCRIPT, _undefined, t)
+	testScriptWithTestLib(SCRIPT, _undefined, t)
 }
 
 func TestStringMatchSym(t *testing.T) {
@@ -105,7 +105,7 @@ var prefix2 = new Prefix("def");
 "abc123".match(prefix1) === true && "abc123".match(prefix2) === false &&
 "def123".match(prefix1) === false && "def123".match(prefix2) === true;
 `
-	testScript1(SCRIPT, valueTrue, t)
+	testScript(SCRIPT, valueTrue, t)
 }
 
 func TestStringMatchAllSym(t *testing.T) {
@@ -124,7 +124,7 @@ var prefix2 = new Prefix("def");
 "abc123".matchAll(prefix1) === true && "abc123".matchAll(prefix2) === false &&
 "def123".matchAll(prefix1) === false && "def123".matchAll(prefix2) === true;
 `
-	testScript1(SCRIPT, valueTrue, t)
+	testScript(SCRIPT, valueTrue, t)
 }
 
 func TestGenericSplitter(t *testing.T) {
@@ -162,7 +162,7 @@ var r = new MyRegexp(/ /);
 var res = "a b c".split(r);
 res.length === 3 && res[0] === "a" && res[1] === "b" && res[2] === "c";
 `
-	testScript1(SCRIPT, valueTrue, t)
+	testScript(SCRIPT, valueTrue, t)
 }
 
 func TestStringIterSurrPair(t *testing.T) {
@@ -184,13 +184,13 @@ if (result.value !== pair) {
 }
 
 `
-	testScript1(SCRIPT, _undefined, t)
+	testScript(SCRIPT, _undefined, t)
 }
 
 func TestValueStringBuilder(t *testing.T) {
 	t.Run("substringASCII", func(t *testing.T) {
 		t.Parallel()
-		var sb valueStringBuilder
+		var sb StringBuilder
 		str := newStringValue("a\U00010000b")
 		sb.WriteSubstring(str, 0, 1)
 		res := sb.String()
@@ -201,7 +201,7 @@ func TestValueStringBuilder(t *testing.T) {
 
 	t.Run("substringASCIIPure", func(t *testing.T) {
 		t.Parallel()
-		var sb valueStringBuilder
+		var sb StringBuilder
 		str := newStringValue("ab")
 		sb.WriteSubstring(str, 0, 1)
 		res := sb.String()
@@ -212,7 +212,7 @@ func TestValueStringBuilder(t *testing.T) {
 
 	t.Run("substringUnicode", func(t *testing.T) {
 		t.Parallel()
-		var sb valueStringBuilder
+		var sb StringBuilder
 		str := newStringValue("a\U00010000b")
 		sb.WriteSubstring(str, 1, 3)
 		res := sb.String()
@@ -223,7 +223,7 @@ func TestValueStringBuilder(t *testing.T) {
 
 	t.Run("substringASCIIUnicode", func(t *testing.T) {
 		t.Parallel()
-		var sb valueStringBuilder
+		var sb StringBuilder
 		str := newStringValue("a\U00010000b")
 		sb.WriteSubstring(str, 0, 2)
 		res := sb.String()
@@ -234,7 +234,7 @@ func TestValueStringBuilder(t *testing.T) {
 
 	t.Run("substringUnicodeASCII", func(t *testing.T) {
 		t.Parallel()
-		var sb valueStringBuilder
+		var sb StringBuilder
 		str := newStringValue("a\U00010000b")
 		sb.WriteSubstring(str, 2, 4)
 		res := sb.String()
@@ -245,11 +245,44 @@ func TestValueStringBuilder(t *testing.T) {
 
 	t.Run("concatSubstringUnicodeASCII", func(t *testing.T) {
 		t.Parallel()
-		var sb valueStringBuilder
+		var sb StringBuilder
 		sb.WriteString(newStringValue("юникод"))
 		sb.WriteSubstring(asciiString(" ascii"), 0, 6)
 		if res := sb.String(); !res.SameAs(newStringValue("юникод ascii")) {
 			t.Fatal(res)
 		}
 	})
+
+	t.Run("concat_ASCII_importedASCII", func(t *testing.T) {
+		t.Parallel()
+		var sb StringBuilder
+		sb.WriteString(asciiString("ascii"))
+		sb.WriteString(&importedString{s: " imported_ascii1234567890"})
+		s := sb.String()
+		if res, ok := s.(asciiString); !ok || res != "ascii imported_ascii1234567890" {
+			t.Fatal(s)
+		}
+	})
+
+	t.Run("concat_ASCII_importedUnicode", func(t *testing.T) {
+		t.Parallel()
+		var sb StringBuilder
+		sb.WriteString(asciiString("ascii"))
+		sb.WriteString(&importedString{s: " imported_юникод"})
+		s := sb.String()
+		if res, ok := s.(unicodeString); !ok || !res.SameAs(newStringValue("ascii imported_юникод")) {
+			t.Fatal(s)
+		}
+	})
+
+}
+
+func TestStringSplit(t *testing.T) {
+	const SCRIPT = `
+	assert(compareArray("".split("#",2), [""]));
+	assert(compareArray("".split("#"), [""]));
+	assert(compareArray("".split("",2), []));
+	assert(compareArray("".split(""), []));
+`
+	testScriptWithTestLib(SCRIPT, _undefined, t)
 }

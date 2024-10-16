@@ -121,7 +121,7 @@ func TestGoSliceProto(t *testing.T) {
 	r := New()
 	a := []interface{}{1, nil, 3}
 	r.Set("a", &a)
-	_, err := r.RunString(TESTLIB + `
+	r.testScriptWithTestLib(`
 	var proto = [,2,,4];
 	Object.setPrototypeOf(a, proto);
 	assert.sameValue(a[1], null, "a[1]");
@@ -139,11 +139,7 @@ func TestGoSliceProto(t *testing.T) {
 	});
 	a[5] = "test";
 	assert.sameValue(v5, "test", "v5");
-	`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	`, _undefined, t)
 }
 
 func TestGoSliceProtoProto(t *testing.T) {
@@ -245,4 +241,58 @@ func TestGoSliceLengthProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestGoSliceSort(t *testing.T) {
+	vm := New()
+	s := []interface{}{4, 2, 3}
+	vm.Set("s", &s)
+	_, err := vm.RunString(`s.sort()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s) != 3 {
+		t.Fatalf("len: %d", len(s))
+	}
+	if s[0] != 2 || s[1] != 3 || s[2] != 4 {
+		t.Fatalf("val: %v", s)
+	}
+}
+
+func TestGoSliceToString(t *testing.T) {
+	vm := New()
+	s := []interface{}{4, 2, 3}
+	vm.Set("s", &s)
+	res, err := vm.RunString("`${s}`")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exp := res.Export(); exp != "4,2,3" {
+		t.Fatal(exp)
+	}
+}
+
+func TestGoSliceExternalLenUpdate(t *testing.T) {
+	data := &[]interface{}{1}
+
+	vm := New()
+	vm.Set("data", data)
+	vm.Set("append", func(a *[]interface{}, v int) {
+		if a != data {
+			panic(vm.NewTypeError("a != data"))
+		}
+		*a = append(*a, v)
+	})
+
+	vm.testScriptWithTestLib(`
+		assert.sameValue(data.length, 1);
+
+        // modify with js
+        data.push(1);
+		assert.sameValue(data.length, 2);
+
+        // modify with go
+        append(data, 2);
+		assert.sameValue(data.length, 3);
+    `, _undefined, t)
 }

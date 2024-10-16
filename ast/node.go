@@ -1,11 +1,10 @@
 /*
 Package ast declares types representing a JavaScript AST.
 
-Warning
+# Warning
 
 The parser and AST interfaces are still works-in-progress (particularly where
 node types are concerned) and may change in the future.
-
 */
 package ast
 
@@ -54,6 +53,17 @@ type (
 	Pattern interface {
 		BindingTarget
 		_pattern()
+	}
+
+	YieldExpression struct {
+		Yield    file.Idx
+		Argument Expression
+		Delegate bool
+	}
+
+	AwaitExpression struct {
+		Await    file.Idx
+		Argument Expression
 	}
 
 	ArrayLiteral struct {
@@ -118,6 +128,19 @@ type (
 		Identifier Identifier
 	}
 
+	PrivateDotExpression struct {
+		Left       Expression
+		Identifier PrivateIdentifier
+	}
+
+	OptionalChain struct {
+		Expression
+	}
+
+	Optional struct {
+		Expression
+	}
+
 	FunctionLiteral struct {
 		Function      file.Idx
 		Name          *Identifier
@@ -126,6 +149,17 @@ type (
 		Source        string
 
 		DeclarationList []*VariableDeclaration
+
+		Async, Generator bool
+	}
+
+	ClassLiteral struct {
+		Class      file.Idx
+		RightBrace file.Idx
+		Name       *Identifier
+		SuperClass Expression
+		Body       []ClassElement
+		Source     string
 	}
 
 	ConciseBody interface {
@@ -143,11 +177,16 @@ type (
 		Body            ConciseBody
 		Source          string
 		DeclarationList []*VariableDeclaration
+		Async           bool
 	}
 
 	Identifier struct {
 		Name unistring.String
 		Idx  file.Idx
+	}
+
+	PrivateIdentifier struct {
+		Identifier
 	}
 
 	NewExpression struct {
@@ -246,6 +285,10 @@ type (
 		Idx file.Idx
 	}
 
+	SuperExpression struct {
+		Idx file.Idx
+	}
+
 	UnaryExpression struct {
 		Operator token.Token
 		Idx      file.Idx // If a prefix operation
@@ -263,6 +306,8 @@ type (
 
 func (*ArrayLiteral) _expressionNode()          {}
 func (*AssignExpression) _expressionNode()      {}
+func (*YieldExpression) _expressionNode()       {}
+func (*AwaitExpression) _expressionNode()       {}
 func (*BadExpression) _expressionNode()         {}
 func (*BinaryExpression) _expressionNode()      {}
 func (*BooleanLiteral) _expressionNode()        {}
@@ -270,7 +315,9 @@ func (*BracketExpression) _expressionNode()     {}
 func (*CallExpression) _expressionNode()        {}
 func (*ConditionalExpression) _expressionNode() {}
 func (*DotExpression) _expressionNode()         {}
+func (*PrivateDotExpression) _expressionNode()  {}
 func (*FunctionLiteral) _expressionNode()       {}
+func (*ClassLiteral) _expressionNode()          {}
 func (*ArrowFunctionLiteral) _expressionNode()  {}
 func (*Identifier) _expressionNode()            {}
 func (*NewExpression) _expressionNode()         {}
@@ -282,6 +329,7 @@ func (*SequenceExpression) _expressionNode()    {}
 func (*StringLiteral) _expressionNode()         {}
 func (*TemplateLiteral) _expressionNode()       {}
 func (*ThisExpression) _expressionNode()        {}
+func (*SuperExpression) _expressionNode()       {}
 func (*UnaryExpression) _expressionNode()       {}
 func (*MetaProperty) _expressionNode()          {}
 func (*ObjectPattern) _expressionNode()         {}
@@ -336,9 +384,10 @@ type (
 	}
 
 	DoWhileStatement struct {
-		Do   file.Idx
-		Test Expression
-		Body Statement
+		Do               file.Idx
+		Test             Expression
+		Body             Statement
+		RightParenthesis file.Idx
 	}
 
 	EmptyStatement struct {
@@ -394,6 +443,7 @@ type (
 		Discriminant Expression
 		Default      int
 		Body         []*CaseStatement
+		RightBrace   file.Idx
 	}
 
 	ThrowStatement struct {
@@ -434,6 +484,10 @@ type (
 	FunctionDeclaration struct {
 		Function *FunctionLiteral
 	}
+
+	ClassDeclaration struct {
+		Class *ClassLiteral
+	}
 )
 
 // _statementNode
@@ -461,6 +515,7 @@ func (*WhileStatement) _statementNode()      {}
 func (*WithStatement) _statementNode()       {}
 func (*LexicalDeclaration) _statementNode()  {}
 func (*FunctionDeclaration) _statementNode() {}
+func (*ClassDeclaration) _statementNode()    {}
 
 // =========== //
 // Declaration //
@@ -471,10 +526,40 @@ type (
 		Var  file.Idx
 		List []*Binding
 	}
+
+	ClassElement interface {
+		Node
+		_classElement()
+	}
+
+	FieldDefinition struct {
+		Idx         file.Idx
+		Key         Expression
+		Initializer Expression
+		Computed    bool
+		Static      bool
+	}
+
+	MethodDefinition struct {
+		Idx      file.Idx
+		Key      Expression
+		Kind     PropertyKind // "method", "get" or "set"
+		Body     *FunctionLiteral
+		Computed bool
+		Static   bool
+	}
+
+	ClassStaticBlock struct {
+		Static          file.Idx
+		Block           *BlockStatement
+		Source          string
+		DeclarationList []*VariableDeclaration
+	}
 )
 
 type (
 	ForLoopInitializer interface {
+		Node
 		_forLoopInitializer()
 	}
 
@@ -492,6 +577,7 @@ type (
 	}
 
 	ForInto interface {
+		Node
 		_forInto()
 	}
 
@@ -535,6 +621,10 @@ func (*Identifier) _bindingTarget() {}
 func (*BlockStatement) _conciseBody() {}
 func (*ExpressionBody) _conciseBody() {}
 
+func (*FieldDefinition) _classElement()  {}
+func (*MethodDefinition) _classElement() {}
+func (*ClassStaticBlock) _classElement() {}
+
 // ==== //
 // Node //
 // ==== //
@@ -553,7 +643,10 @@ type Program struct {
 
 func (self *ArrayLiteral) Idx0() file.Idx          { return self.LeftBracket }
 func (self *ArrayPattern) Idx0() file.Idx          { return self.LeftBracket }
+func (self *YieldExpression) Idx0() file.Idx       { return self.Yield }
+func (self *AwaitExpression) Idx0() file.Idx       { return self.Await }
 func (self *ObjectPattern) Idx0() file.Idx         { return self.LeftBrace }
+func (self *ParameterList) Idx0() file.Idx         { return self.Opening }
 func (self *AssignExpression) Idx0() file.Idx      { return self.Left.Idx0() }
 func (self *BadExpression) Idx0() file.Idx         { return self.From }
 func (self *BinaryExpression) Idx0() file.Idx      { return self.Left.Idx0() }
@@ -562,7 +655,9 @@ func (self *BracketExpression) Idx0() file.Idx     { return self.Left.Idx0() }
 func (self *CallExpression) Idx0() file.Idx        { return self.Callee.Idx0() }
 func (self *ConditionalExpression) Idx0() file.Idx { return self.Test.Idx0() }
 func (self *DotExpression) Idx0() file.Idx         { return self.Left.Idx0() }
+func (self *PrivateDotExpression) Idx0() file.Idx  { return self.Left.Idx0() }
 func (self *FunctionLiteral) Idx0() file.Idx       { return self.Function }
+func (self *ClassLiteral) Idx0() file.Idx          { return self.Class }
 func (self *ArrowFunctionLiteral) Idx0() file.Idx  { return self.Start }
 func (self *Identifier) Idx0() file.Idx            { return self.Idx }
 func (self *NewExpression) Idx0() file.Idx         { return self.New }
@@ -572,10 +667,17 @@ func (self *ObjectLiteral) Idx0() file.Idx         { return self.LeftBrace }
 func (self *RegExpLiteral) Idx0() file.Idx         { return self.Idx }
 func (self *SequenceExpression) Idx0() file.Idx    { return self.Sequence[0].Idx0() }
 func (self *StringLiteral) Idx0() file.Idx         { return self.Idx }
+func (self *TemplateElement) Idx0() file.Idx       { return self.Idx }
 func (self *TemplateLiteral) Idx0() file.Idx       { return self.OpenQuote }
 func (self *ThisExpression) Idx0() file.Idx        { return self.Idx }
-func (self *UnaryExpression) Idx0() file.Idx       { return self.Idx }
-func (self *MetaProperty) Idx0() file.Idx          { return self.Idx }
+func (self *SuperExpression) Idx0() file.Idx       { return self.Idx }
+func (self *UnaryExpression) Idx0() file.Idx {
+	if self.Postfix {
+		return self.Operand.Idx0()
+	}
+	return self.Idx
+}
+func (self *MetaProperty) Idx0() file.Idx { return self.Idx }
 
 func (self *BadStatement) Idx0() file.Idx        { return self.From }
 func (self *BlockStatement) Idx0() file.Idx      { return self.LeftBrace }
@@ -601,12 +703,24 @@ func (self *WhileStatement) Idx0() file.Idx      { return self.While }
 func (self *WithStatement) Idx0() file.Idx       { return self.With }
 func (self *LexicalDeclaration) Idx0() file.Idx  { return self.Idx }
 func (self *FunctionDeclaration) Idx0() file.Idx { return self.Function.Idx0() }
+func (self *ClassDeclaration) Idx0() file.Idx    { return self.Class.Idx0() }
 func (self *Binding) Idx0() file.Idx             { return self.Target.Idx0() }
 
+func (self *ForLoopInitializerExpression) Idx0() file.Idx  { return self.Expression.Idx0() }
 func (self *ForLoopInitializerVarDeclList) Idx0() file.Idx { return self.List[0].Idx0() }
+func (self *ForLoopInitializerLexicalDecl) Idx0() file.Idx { return self.LexicalDeclaration.Idx0() }
 func (self *PropertyShort) Idx0() file.Idx                 { return self.Name.Idx }
 func (self *PropertyKeyed) Idx0() file.Idx                 { return self.Key.Idx0() }
 func (self *ExpressionBody) Idx0() file.Idx                { return self.Expression.Idx0() }
+
+func (self *VariableDeclaration) Idx0() file.Idx { return self.Var }
+func (self *FieldDefinition) Idx0() file.Idx     { return self.Idx }
+func (self *MethodDefinition) Idx0() file.Idx    { return self.Idx }
+func (self *ClassStaticBlock) Idx0() file.Idx    { return self.Static }
+
+func (self *ForDeclaration) Idx0() file.Idx    { return self.Idx }
+func (self *ForIntoVar) Idx0() file.Idx        { return self.Binding.Idx0() }
+func (self *ForIntoExpression) Idx0() file.Idx { return self.Expression.Idx0() }
 
 // ==== //
 // Idx1 //
@@ -615,14 +729,17 @@ func (self *ExpressionBody) Idx0() file.Idx                { return self.Express
 func (self *ArrayLiteral) Idx1() file.Idx          { return self.RightBracket + 1 }
 func (self *ArrayPattern) Idx1() file.Idx          { return self.RightBracket + 1 }
 func (self *AssignExpression) Idx1() file.Idx      { return self.Right.Idx1() }
+func (self *AwaitExpression) Idx1() file.Idx       { return self.Argument.Idx1() }
 func (self *BadExpression) Idx1() file.Idx         { return self.To }
 func (self *BinaryExpression) Idx1() file.Idx      { return self.Right.Idx1() }
 func (self *BooleanLiteral) Idx1() file.Idx        { return file.Idx(int(self.Idx) + len(self.Literal)) }
 func (self *BracketExpression) Idx1() file.Idx     { return self.RightBracket + 1 }
 func (self *CallExpression) Idx1() file.Idx        { return self.RightParenthesis + 1 }
-func (self *ConditionalExpression) Idx1() file.Idx { return self.Test.Idx1() }
+func (self *ConditionalExpression) Idx1() file.Idx { return self.Alternate.Idx1() }
 func (self *DotExpression) Idx1() file.Idx         { return self.Identifier.Idx1() }
+func (self *PrivateDotExpression) Idx1() file.Idx  { return self.Identifier.Idx1() }
 func (self *FunctionLiteral) Idx1() file.Idx       { return self.Body.Idx1() }
+func (self *ClassLiteral) Idx1() file.Idx          { return self.RightBrace + 1 }
 func (self *ArrowFunctionLiteral) Idx1() file.Idx  { return self.Body.Idx1() }
 func (self *Identifier) Idx1() file.Idx            { return file.Idx(int(self.Idx) + len(self.Name)) }
 func (self *NewExpression) Idx1() file.Idx {
@@ -636,11 +753,14 @@ func (self *NullLiteral) Idx1() file.Idx        { return file.Idx(int(self.Idx) 
 func (self *NumberLiteral) Idx1() file.Idx      { return file.Idx(int(self.Idx) + len(self.Literal)) }
 func (self *ObjectLiteral) Idx1() file.Idx      { return self.RightBrace + 1 }
 func (self *ObjectPattern) Idx1() file.Idx      { return self.RightBrace + 1 }
+func (self *ParameterList) Idx1() file.Idx      { return self.Closing + 1 }
 func (self *RegExpLiteral) Idx1() file.Idx      { return file.Idx(int(self.Idx) + len(self.Literal)) }
 func (self *SequenceExpression) Idx1() file.Idx { return self.Sequence[len(self.Sequence)-1].Idx1() }
 func (self *StringLiteral) Idx1() file.Idx      { return file.Idx(int(self.Idx) + len(self.Literal)) }
+func (self *TemplateElement) Idx1() file.Idx    { return file.Idx(int(self.Idx) + len(self.Literal)) }
 func (self *TemplateLiteral) Idx1() file.Idx    { return self.CloseQuote + 1 }
 func (self *ThisExpression) Idx1() file.Idx     { return self.Idx + 4 }
+func (self *SuperExpression) Idx1() file.Idx    { return self.Idx + 5 }
 func (self *UnaryExpression) Idx1() file.Idx {
 	if self.Postfix {
 		return self.Operand.Idx1() + 2 // ++ --
@@ -651,13 +771,18 @@ func (self *MetaProperty) Idx1() file.Idx {
 	return self.Property.Idx1()
 }
 
-func (self *BadStatement) Idx1() file.Idx        { return self.To }
-func (self *BlockStatement) Idx1() file.Idx      { return self.RightBrace + 1 }
-func (self *BranchStatement) Idx1() file.Idx     { return self.Idx }
+func (self *BadStatement) Idx1() file.Idx   { return self.To }
+func (self *BlockStatement) Idx1() file.Idx { return self.RightBrace + 1 }
+func (self *BranchStatement) Idx1() file.Idx {
+	if self.Label == nil {
+		return file.Idx(int(self.Idx) + len(self.Token.String()))
+	}
+	return self.Label.Idx1()
+}
 func (self *CaseStatement) Idx1() file.Idx       { return self.Consequent[len(self.Consequent)-1].Idx1() }
 func (self *CatchStatement) Idx1() file.Idx      { return self.Body.Idx1() }
 func (self *DebuggerStatement) Idx1() file.Idx   { return self.Debugger + 8 }
-func (self *DoWhileStatement) Idx1() file.Idx    { return self.Test.Idx1() }
+func (self *DoWhileStatement) Idx1() file.Idx    { return self.RightParenthesis + 1 }
 func (self *EmptyStatement) Idx1() file.Idx      { return self.Semicolon + 1 }
 func (self *ExpressionStatement) Idx1() file.Idx { return self.Expression.Idx1() }
 func (self *ForInStatement) Idx1() file.Idx      { return self.Body.Idx1() }
@@ -669,11 +794,16 @@ func (self *IfStatement) Idx1() file.Idx {
 	}
 	return self.Consequent.Idx1()
 }
-func (self *LabelledStatement) Idx1() file.Idx { return self.Colon + 1 }
+func (self *LabelledStatement) Idx1() file.Idx { return self.Statement.Idx1() }
 func (self *Program) Idx1() file.Idx           { return self.Body[len(self.Body)-1].Idx1() }
-func (self *ReturnStatement) Idx1() file.Idx   { return self.Return + 6 }
-func (self *SwitchStatement) Idx1() file.Idx   { return self.Body[len(self.Body)-1].Idx1() }
-func (self *ThrowStatement) Idx1() file.Idx    { return self.Argument.Idx1() }
+func (self *ReturnStatement) Idx1() file.Idx {
+	if self.Argument != nil {
+		return self.Argument.Idx1()
+	}
+	return self.Return + 6
+}
+func (self *SwitchStatement) Idx1() file.Idx { return self.RightBrace + 1 }
+func (self *ThrowStatement) Idx1() file.Idx  { return self.Argument.Idx1() }
 func (self *TryStatement) Idx1() file.Idx {
 	if self.Finally != nil {
 		return self.Finally.Idx1()
@@ -688,6 +818,7 @@ func (self *WhileStatement) Idx1() file.Idx      { return self.Body.Idx1() }
 func (self *WithStatement) Idx1() file.Idx       { return self.Body.Idx1() }
 func (self *LexicalDeclaration) Idx1() file.Idx  { return self.List[len(self.List)-1].Idx1() }
 func (self *FunctionDeclaration) Idx1() file.Idx { return self.Function.Idx1() }
+func (self *ClassDeclaration) Idx1() file.Idx    { return self.Class.Idx1() }
 func (self *Binding) Idx1() file.Idx {
 	if self.Initializer != nil {
 		return self.Initializer.Idx1()
@@ -695,7 +826,9 @@ func (self *Binding) Idx1() file.Idx {
 	return self.Target.Idx1()
 }
 
+func (self *ForLoopInitializerExpression) Idx1() file.Idx  { return self.Expression.Idx1() }
 func (self *ForLoopInitializerVarDeclList) Idx1() file.Idx { return self.List[len(self.List)-1].Idx1() }
+func (self *ForLoopInitializerLexicalDecl) Idx1() file.Idx { return self.LexicalDeclaration.Idx1() }
 
 func (self *PropertyShort) Idx1() file.Idx {
 	if self.Initializer != nil {
@@ -707,3 +840,37 @@ func (self *PropertyShort) Idx1() file.Idx {
 func (self *PropertyKeyed) Idx1() file.Idx { return self.Value.Idx1() }
 
 func (self *ExpressionBody) Idx1() file.Idx { return self.Expression.Idx1() }
+
+func (self *VariableDeclaration) Idx1() file.Idx {
+	if len(self.List) > 0 {
+		return self.List[len(self.List)-1].Idx1()
+	}
+
+	return self.Var + 3
+}
+
+func (self *FieldDefinition) Idx1() file.Idx {
+	if self.Initializer != nil {
+		return self.Initializer.Idx1()
+	}
+	return self.Key.Idx1()
+}
+
+func (self *MethodDefinition) Idx1() file.Idx {
+	return self.Body.Idx1()
+}
+
+func (self *ClassStaticBlock) Idx1() file.Idx {
+	return self.Block.Idx1()
+}
+
+func (self *YieldExpression) Idx1() file.Idx {
+	if self.Argument != nil {
+		return self.Argument.Idx1()
+	}
+	return self.Yield + 5
+}
+
+func (self *ForDeclaration) Idx1() file.Idx    { return self.Target.Idx1() }
+func (self *ForIntoVar) Idx1() file.Idx        { return self.Binding.Idx1() }
+func (self *ForIntoExpression) Idx1() file.Idx { return self.Expression.Idx1() }
