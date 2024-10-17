@@ -2,8 +2,6 @@ module github.com/peace0phmind/goja
 
 go 1.20
 
-replace github.com/peace0phmind/goja_nodejs => /Users/mind/projects/goja_nodejs
-
 require (
 	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/dlclark/regexp2 v1.11.4
