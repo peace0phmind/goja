@@ -64,6 +64,7 @@ type global struct {
 	Promise  *Object
 	Math     *Object
 	JSON     *Object
+	Http     *Object
 
 	AsyncFunction *Object
 

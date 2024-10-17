@@ -1,6 +1,16 @@
 package goja
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
+
+func TestMathStatic(t *testing.T) {
+	const SCRIPT = `
+		Math.PI
+	`
+	testScript(SCRIPT, valueFloat(math.Pi), t)
+}
 
 func TestMean1(t *testing.T) {
 	const SCRIPT = `

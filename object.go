@@ -28,6 +28,7 @@ const (
 	classJSON          = "JSON"
 	classGlobal        = "global"
 	classPromise       = "Promise"
+	classHttp          = "Http"
 
 	classArrayIterator        = "Array Iterator"
 	classMapIterator          = "Map Iterator"
