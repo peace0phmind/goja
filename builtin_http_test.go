@@ -44,7 +44,7 @@ func TestMyNewTest(t *testing.T) {
 	server := startTestServer()
 	defer server.Close()
 
-	SCRIPT := fmt.Sprintf("let msg, err; Http.get(\"%s\", {timeout: 1000}).then(x => msg = x.Data.message).catch(e => err = e);  msg", server.URL)
+	SCRIPT := fmt.Sprintf("let msg, err; Http.get(\"%s\", {responseType: 'json'}).then(x => msg = x.Data.message).catch(e => err = e);  msg", server.URL)
 	rt := New()
 	v, _ := rt.RunScript("", SCRIPT)
 	println(v.String())

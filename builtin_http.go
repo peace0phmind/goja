@@ -162,7 +162,7 @@ func (r *Runtime) http_getHttpConfig(argValue Value) HttpConfig {
 	return conf
 }
 
-func (r *Runtime) http_responseToHttpResponse(response *http.Response, conf HttpConfig) *httpResponse {
+func (r *Runtime) http_responseToHttpResponse(response *http.Response, conf HttpConfig) (*httpResponse, error) {
 	resp := &httpResponse{}
 	resp.Status = response.StatusCode
 	resp.StatusText = response.Status
@@ -173,10 +173,10 @@ func (r *Runtime) http_responseToHttpResponse(response *http.Response, conf Http
 	}
 	resp.Headers = r.ToValue(headerMap)
 
+	defer response.Body.Close()
 	buf, err := io.ReadAll(response.Body)
 	if err != nil {
-		// log out err
-		return nil
+		return nil, err
 	}
 
 	switch strings.ToLower(conf.ResponseType) {
@@ -184,13 +184,13 @@ func (r *Runtime) http_responseToHttpResponse(response *http.Response, conf Http
 		d := json.NewDecoder(strings.NewReader(string(buf)))
 		resp.Data, err = r.builtinJSON_decodeValue(d)
 		if err != nil {
-			return nil
+			return nil, err
 		}
 	case "text":
 		resp.Data = asciiString(buf)
 	}
 
-	return resp
+	return resp, nil
 }
 
 func (r *Runtime) _http_request(conf HttpConfig) Value {
@@ -201,15 +201,13 @@ func (r *Runtime) _http_request(conf HttpConfig) Value {
 		return r.ToValue(p)
 	}
 
-	baseURL, err := conf.getUrl()
+	strUrl, err := conf.getUrl()
 	if err != nil {
 		reject(err)
 		return r.ToValue(p)
 	}
 
-	conf.BaseURL = baseURL
-
-	u, err := url.Parse(baseURL)
+	u, err := url.Parse(strUrl)
 	if err != nil {
 		reject(err)
 		return r.ToValue(p)
@@ -219,7 +217,6 @@ func (r *Runtime) _http_request(conf HttpConfig) Value {
 	for k, v := range conf.Params {
 		values.Set(k, fmt.Sprintf("%v", v))
 	}
-
 	u.RawQuery = values.Encode()
 
 	req, err := http.NewRequest(conf.Method, u.String(), bytes.NewReader(conf.Data))
@@ -243,8 +240,8 @@ func (r *Runtime) _http_request(conf HttpConfig) Value {
 		return r.ToValue(p)
 	}
 
-	resp := r.http_responseToHttpResponse(response, conf)
-	if resp == nil {
+	resp, err := r.http_responseToHttpResponse(response, conf)
+	if err != nil {
 		reject(err)
 		return r.ToValue(p)
 	}
