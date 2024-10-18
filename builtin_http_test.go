@@ -35,7 +35,17 @@ func TestHttpGetData(t *testing.T) {
 	server := startTestServer()
 	defer server.Close()
 
-	SCRIPT := fmt.Sprintf("JSON.parse(Http.get(\"%s\").Data).message", server.URL)
+	SCRIPT := fmt.Sprintf("Http.get(\"%s\", {timeout: 1000}).Data.message", server.URL)
+
+	testScript(SCRIPT, asciiString("Hello, World!"), t)
+}
+
+func TestHttpConfigTest(t *testing.T) {
+	SCRIPT := `Http.get("https://baidu.com?abc=123", {
+		params: {
+			ttt: "abc efg"
+		}
+	})`
 
 	testScript(SCRIPT, asciiString("Hello, World!"), t)
 }
