@@ -35,9 +35,21 @@ func TestHttpGetData(t *testing.T) {
 	server := startTestServer()
 	defer server.Close()
 
-	SCRIPT := fmt.Sprintf("Http.get(\"%s\", {timeout: 1000}).Data.message", server.URL)
+	SCRIPT := fmt.Sprintf("let msg = 1; Http.get(\"%s\", {timeout: 1000}).then(function(x) { msg = x.StatusText }); msg", server.URL)
 
 	testScript(SCRIPT, asciiString("Hello, World!"), t)
+}
+
+func TestMyNewTest(t *testing.T) {
+	server := startTestServer()
+	defer server.Close()
+
+	SCRIPT := fmt.Sprintf("let msg, err; Http.get(\"%s\", {timeout: 1000}).then(x => msg = x.Data.message).catch(e => err = e);  msg", server.URL)
+	rt := New()
+	v, _ := rt.RunScript("", SCRIPT)
+	println(v.String())
+	println(rt.Get("msg").toString().String())
+	println(rt.Get("err").toString().String())
 }
 
 func TestHttpConfigTest(t *testing.T) {

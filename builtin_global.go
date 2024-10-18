@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
@@ -328,6 +329,11 @@ func (r *Runtime) builtin_unescape(call FunctionCall) Value {
 	return asciiString(asciiBuf)
 }
 
+func (r *Runtime) builtin_sleep(call FunctionCall) Value {
+	time.Sleep(time.Duration(call.Argument(0).ToInteger()) * time.Millisecond)
+	return _null
+}
+
 func createGlobalObjectTemplate() *objectTemplate {
 	t := newObjectTemplate()
 	t.protoFactory = func(r *Runtime) *Object {
@@ -385,6 +391,7 @@ func createGlobalObjectTemplate() *objectTemplate {
 	t.putStr("unescape", func(r *Runtime) Value { return r.methodProp(r.builtin_unescape, "unescape", 1) })
 
 	// TODO: Annex B
+	t.putStr("sleep", func(r *Runtime) Value { return r.methodProp(r.builtin_sleep, "sleep", 1) })
 
 	t.putSym(SymToStringTag, func(r *Runtime) Value { return valueProp(asciiString(classGlobal), false, false, true) })
 

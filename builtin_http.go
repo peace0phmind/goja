@@ -194,18 +194,25 @@ func (r *Runtime) http_responseToHttpResponse(response *http.Response, conf Http
 }
 
 func (r *Runtime) _http_request(conf HttpConfig) Value {
+	p, resolve, reject := r.NewPromise()
+
+	if err := conf.CheckError(); err != nil {
+		reject(err)
+		return r.ToValue(p)
+	}
+
 	baseURL, err := conf.getUrl()
 	if err != nil {
-		fmt.Println("Error parsing URL:", err)
-		return _undefined
+		reject(err)
+		return r.ToValue(p)
 	}
 
 	conf.BaseURL = baseURL
 
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		fmt.Println("Error parsing URL:", err)
-		return _undefined
+		reject(err)
+		return r.ToValue(p)
 	}
 
 	values := u.Query()
@@ -213,13 +220,12 @@ func (r *Runtime) _http_request(conf HttpConfig) Value {
 		values.Set(k, fmt.Sprintf("%v", v))
 	}
 
-	// 更新 URL 的查询部分
 	u.RawQuery = values.Encode()
 
 	req, err := http.NewRequest(conf.Method, u.String(), bytes.NewReader(conf.Data))
 	if err != nil {
-		fmt.Println("Error creating request:", err)
-		return _undefined
+		reject(err)
+		return r.ToValue(p)
 	}
 
 	req.Header.Set("Content-Type", "application/"+conf.ResponseType)
@@ -233,25 +239,22 @@ func (r *Runtime) _http_request(conf HttpConfig) Value {
 
 	response, err := client.Do(req)
 	if err != nil {
-		// log out err
-		return _undefined
+		reject(err)
+		return r.ToValue(p)
 	}
 
 	resp := r.http_responseToHttpResponse(response, conf)
 	if resp == nil {
-		return _undefined
+		reject(err)
+		return r.ToValue(p)
 	}
 
-	return r.ToValue(resp)
+	resolve(resp)
+	return r.ToValue(p)
 }
 
 func (r *Runtime) http_request(call FunctionCall) Value {
 	conf := r.http_getHttpConfig(call.Argument(0))
-
-	if err := conf.CheckError(); err != nil {
-		return _undefined
-	}
-
 	return r._http_request(conf)
 }
 
@@ -260,10 +263,6 @@ func (r *Runtime) http_get(call FunctionCall) Value {
 	conf := r.http_getHttpConfig(call.Argument(1))
 	conf.Url = urlStr
 	conf.Method = http.MethodGet
-
-	if err := conf.CheckError(); err != nil {
-		return _undefined
-	}
 
 	return r._http_request(conf)
 }
@@ -274,10 +273,6 @@ func (r *Runtime) http_delete(call FunctionCall) Value {
 	conf.Url = urlStr
 	conf.Method = http.MethodDelete
 
-	if err := conf.CheckError(); err != nil {
-		return _undefined
-	}
-
 	return r._http_request(conf)
 }
 
@@ -287,10 +282,6 @@ func (r *Runtime) http_head(call FunctionCall) Value {
 	conf.Url = urlStr
 	conf.Method = http.MethodHead
 
-	if err := conf.CheckError(); err != nil {
-		return _undefined
-	}
-
 	return r._http_request(conf)
 }
 
@@ -299,10 +290,6 @@ func (r *Runtime) http_options(call FunctionCall) Value {
 	conf := r.http_getHttpConfig(call.Argument(1))
 	conf.Url = urlStr
 	conf.Method = http.MethodOptions
-
-	if err := conf.CheckError(); err != nil {
-		return _undefined
-	}
 
 	return r._http_request(conf)
 }
@@ -315,10 +302,6 @@ func (r *Runtime) http_post(call FunctionCall) Value {
 	conf.Method = http.MethodPost
 	//conf.Data = data
 
-	if err := conf.CheckError(); err != nil {
-		return _undefined
-	}
-
 	return r._http_request(conf)
 }
 
@@ -330,10 +313,6 @@ func (r *Runtime) http_put(call FunctionCall) Value {
 	conf.Method = http.MethodPut
 	//conf.Data = data
 
-	if err := conf.CheckError(); err != nil {
-		return _undefined
-	}
-
 	return r._http_request(conf)
 }
 
@@ -344,10 +323,6 @@ func (r *Runtime) http_patch(call FunctionCall) Value {
 	conf.Url = urlStr
 	conf.Method = http.MethodPatch
 	//conf.Data = data
-
-	if err := conf.CheckError(); err != nil {
-		return _undefined
-	}
 
 	return r._http_request(conf)
 }
