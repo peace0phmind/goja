@@ -1,0 +1,325 @@
+name: String
+description: JavaScript String 对象的内置实现
+
+static_methods:
+  fromCharCode:
+    description: 从一系列 Unicode 值创建字符串
+    parameters:
+      - name: num
+        type: number
+        description: 一个或多个 Unicode 值
+    returns: string
+    example: String.fromCharCode(65, 66, 67) // returns "ABC"
+
+  fromCodePoint:
+    description: 从一系列码点创建字符串
+    parameters:
+      - name: num
+        type: number
+        description: 一个或多个码点值
+    returns: string
+    example: String.fromCodePoint(0x2F804) // returns a string containing the character 你
+
+  raw:
+    description: 模板字符串的标签函数
+    parameters:
+      - name: template
+        type: object
+        description: 包含原始字符串信息的对象
+    returns: string
+    example: String.raw`Hi\n${2+3}!` // returns "Hi\\n5!"
+
+properties:
+  length:
+    type: number
+    description: 字符串的长度
+    example: "abc".length // returns 3
+
+prototype_methods:
+  at:
+    description: 返回指定索引处的字符,支持负数索引
+    parameters:
+      - name: index
+        type: number
+        description: 字符的索引位置
+    returns: string
+    example: "abc".at(-1) // returns "c"
+
+  charAt:
+    description: 返回指定位置的字符
+    parameters:
+      - name: index
+        type: number
+        description: 字符的索引位置
+    returns: string
+    example: "abc".charAt(1) // returns "b"
+
+  charCodeAt:
+    description: 返回指定位置字符的 Unicode 值
+    parameters:
+      - name: index
+        type: number
+        description: 字符的索引位置
+    returns: number
+    example: "ABC".charCodeAt(0) // returns 65
+
+  codePointAt:
+    description: 返回指定位置字符的码点值
+    parameters:
+      - name: index
+        type: number
+        description: 字符的索引位置
+    returns: number
+    example: "😀".codePointAt(0) // returns 128512
+
+  concat:
+    description: 连接两个或多个字符串
+    parameters:
+      - name: str
+        type: string
+        description: 要连接的字符串
+    returns: string
+    example: "Hello".concat(" ", "World") // returns "Hello World"
+
+  endsWith:
+    description: 判断字符串是否以指定字符串结尾
+    parameters:
+      - name: searchString
+        type: string
+        description: 要搜索的字符串
+      - name: length
+        type: number
+        description: 可选,搜索的长度
+    returns: boolean
+    example: "Hello World".endsWith("World") // returns true
+
+  includes:
+    description: 判断字符串是否包含指定的子字符串
+    parameters:
+      - name: searchString
+        type: string
+        description: 要搜索的字符串
+      - name: position
+        type: number
+        description: 可选,开始搜索的位置
+    returns: boolean
+    example: "Hello World".includes("World") // returns true
+
+  indexOf:
+    description: 返回指定子字符串第一次出现的位置
+    parameters:
+      - name: searchValue
+        type: string
+        description: 要搜索的字符串
+      - name: fromIndex
+        type: number
+        description: 可选,开始搜索的位置
+    returns: number
+    example: "Hello World".indexOf("World") // returns 6
+
+  lastIndexOf:
+    description: 返回指定子字符串最后一次出现的位置
+    parameters:
+      - name: searchValue
+        type: string
+        description: 要搜索的字符串
+      - name: fromIndex
+        type: number
+        description: 可选,开始搜索的位置
+    returns: number
+    example: "Hello World World".lastIndexOf("World") // returns 12
+
+  localeCompare:
+    description: 比较两个字符串在当前语言环境下的顺序
+    parameters:
+      - name: compareString
+        type: string
+        description: 要比较的字符串
+    returns: number
+    example: "a".localeCompare("b") // returns -1
+
+  match:
+    description: 使用正则表达式匹配字符串
+    parameters:
+      - name: regexp
+        type: RegExp
+        description: 正则表达式对象
+    returns: Array
+    example: "test1test2".match(/test\d/g) // returns ["test1", "test2"]
+
+  normalize:
+    description: 返回字符串的 Unicode 标准化形式
+    parameters:
+      - name: form
+        type: string
+        description: 可选,标准化形式("NFC", "NFD", "NFKC", "NFKD")
+    returns: string
+    example: "\u1E9B\u0323".normalize() // returns "\u1E9B\u0323"
+
+  padEnd:
+    description: 在字符串末尾填充字符串到指定长度
+    parameters:
+      - name: targetLength
+        type: number
+        description: 目标长度
+      - name: padString
+        type: string
+        description: 可选,填充字符串
+    returns: string
+    example: "abc".padEnd(6, "123") // returns "abc123"
+
+  padStart:
+    description: 在字符串开头填充字符串到指定长度
+    parameters:
+      - name: targetLength
+        type: number
+        description: 目标长度
+      - name: padString
+        type: string
+        description: 可选,填充字符串
+    returns: string
+    example: "abc".padStart(6, "123") // returns "123abc"
+
+  repeat:
+    description: 重复字符串指定次数
+    parameters:
+      - name: count
+        type: number
+        description: 重复次数
+    returns: string
+    example: "abc".repeat(2) // returns "abcabc"
+
+  replace:
+    description: 替换字符串中的子字符串
+    parameters:
+      - name: searchValue
+        type: string|RegExp
+        description: 要替换的字符串或正则表达式
+      - name: replaceValue
+        type: string|Function
+        description: 替换值或替换函数
+    returns: string
+    example: "Hello World".replace("World", "JavaScript") // returns "Hello JavaScript"
+
+  replaceAll:
+    description: 替换字符串中所有匹配的子字符串
+    parameters:
+      - name: searchValue
+        type: string|RegExp
+        description: 要替换的字符串或正则表达式
+      - name: replaceValue
+        type: string|Function
+        description: 替换值或替换函数
+    returns: string
+    example: "test test".replaceAll("test", "new") // returns "new new"
+
+  search:
+    description: 使用正则表达式搜索字符串
+    parameters:
+      - name: regexp
+        type: RegExp
+        description: 正则表达式对象
+    returns: number
+    example: "test".search(/est/) // returns 1
+
+  slice:
+    description: 提取字符串的一部分
+    parameters:
+      - name: beginIndex
+        type: number
+        description: 开始位置
+      - name: endIndex
+        type: number
+        description: 可选,结束位置
+    returns: string
+    example: "Hello World".slice(6) // returns "World"
+
+  split:
+    description: 将字符串分割成数组
+    parameters:
+      - name: separator
+        type: string|RegExp
+        description: 分隔符
+      - name: limit
+        type: number
+        description: 可选,限制结果数量
+    returns: Array
+    example: "a,b,c".split(",") // returns ["a", "b", "c"]
+
+  startsWith:
+    description: 判断字符串是否以指定字符串开头
+    parameters:
+      - name: searchString
+        type: string
+        description: 要搜索的字符串
+      - name: position
+        type: number
+        description: 可选,开始搜索的位置
+    returns: boolean
+    example: "Hello World".startsWith("Hello") // returns true
+
+  substring:
+    description: 返回字符串的子串
+    parameters:
+      - name: indexStart
+        type: number
+        description: 开始位置
+      - name: indexEnd
+        type: number
+        description: 可选,结束位置
+    returns: string
+    example: "Hello World".substring(6) // returns "World"
+
+  toLowerCase:
+    description: 将字符串转换为小写
+    returns: string
+    example: "Hello World".toLowerCase() // returns "hello world"
+
+  toUpperCase:
+    description: 将字符串转换为大写
+    returns: string
+    example: "Hello World".toUpperCase() // returns "HELLO WORLD"
+
+  trim:
+    description: 删除字符串两端的空白字符
+    returns: string
+    example: "  Hello World  ".trim() // returns "Hello World"
+
+  trimEnd:
+    description: 删除字符串末尾的空白字符
+    returns: string
+    example: "Hello World  ".trimEnd() // returns "Hello World"
+
+  trimStart:
+    description: 删除字符串开头的空白字符
+    returns: string
+    example: "  Hello World".trimStart() // returns "Hello World"
+
+  toString:
+    description: 返回字符串对象的字符串表示
+    returns: string
+    example: new String("Hello").toString() // returns "Hello"
+
+  valueOf:
+    description: 返回字符串对象的原始值
+    returns: string
+    example: new String("Hello").valueOf() // returns "Hello"
+
+  substr:
+    description: 从指定位置开始返回指定长度的子字符串(已废弃)
+    parameters:
+      - name: start
+        type: number
+        description: 开始位置
+      - name: length
+        type: number
+        description: 可选,提取的字符数
+    returns: string
+    example: "Hello World".substr(6, 5) // returns "World"
+
+iterator:
+  description: String 对象实现了迭代器接口
+  example: |
+    for (let char of "Hello") {
+      console.log(char); // prints H, e, l, l, o
+    } 

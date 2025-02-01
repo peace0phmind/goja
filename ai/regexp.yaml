@@ -1,0 +1,127 @@
+properties:
+  source:
+    type: string
+    description: 返回正则表达式的源文本
+    access: readonly
+    configurable: true
+  global:
+    type: boolean
+    description: 是否设置了全局匹配标志 'g'
+    access: readonly
+    configurable: true
+  multiline:
+    type: boolean
+    description: 是否设置了多行匹配标志 'm'
+    access: readonly
+    configurable: true
+  dotAll:
+    type: boolean
+    description: 是否设置了点号匹配所有字符标志 's'
+    access: readonly
+    configurable: true
+  ignoreCase:
+    type: boolean
+    description: 是否设置了忽略大小写标志 'i'
+    access: readonly
+    configurable: true
+  unicode:
+    type: boolean
+    description: 是否设置了 Unicode 标志 'u'
+    access: readonly
+    configurable: true
+  sticky:
+    type: boolean
+    description: 是否设置了粘性匹配标志 'y'
+    access: readonly
+    configurable: true
+  flags:
+    type: string
+    description: 返回正则表达式的标志字符串
+    access: readonly
+    configurable: true
+  lastIndex:
+    type: number
+    description: 下一次匹配的起始索引
+    access: readwrite
+    configurable: false
+
+methods:
+  exec:
+    description: 在字符串中执行匹配搜索，返回结果数组或 null
+    arguments:
+      - name: str
+        type: string
+        description: 要搜索的字符串
+    returns: Array|null
+
+  test:
+    description: 测试字符串是否匹配正则表达式
+    arguments:
+      - name: str
+        type: string
+        description: 要测试的字符串
+    returns: boolean
+
+  compile:
+    description: 重新编译正则表达式
+    arguments:
+      - name: pattern
+        type: string|RegExp
+        description: 新的正则表达式模式
+      - name: flags
+        type: string
+        description: 新的标志字符串
+        optional: true
+    returns: RegExp
+
+  toString:
+    description: 返回表示该正则表达式的字符串
+    returns: string
+
+symbols:
+  Symbol.match:
+    description: 在字符串上执行匹配操作
+    arguments:
+      - name: str
+        type: string
+        description: 要匹配的字符串
+    returns: Array|null
+
+  Symbol.matchAll:
+    description: 返回一个迭代器，包含所有匹配结果
+    arguments:
+      - name: str
+        type: string
+        description: 要匹配的字符串
+    returns: Iterator
+
+  Symbol.search:
+    description: 在字符串中搜索匹配项
+    arguments:
+      - name: str
+        type: string
+        description: 要搜索的字符串
+    returns: number
+
+  Symbol.split:
+    description: 使用正则表达式分割字符串
+    arguments:
+      - name: str
+        type: string
+        description: 要分割的字符串
+      - name: limit
+        type: number
+        description: 限制结果数组的长度
+        optional: true
+    returns: Array
+
+  Symbol.replace:
+    description: 替换字符串中的匹配项
+    arguments:
+      - name: str
+        type: string
+        description: 要处理的字符串
+      - name: replacement
+        type: string|Function
+        description: 替换字符串或函数
+    returns: string 
